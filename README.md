@@ -7,7 +7,9 @@
 
 ## 发给测试 AI / 同事的一键安装
 
-把下面整段发给同事的 Cursor / Claude Code / 其他 Agent 即可：
+按同事用的 **Agent 选一段**（不要混用）。写死 `-a cursor` 时，**Codex 装不上 / 装完也读不到**。
+
+### A. Cursor
 
 ```text
 根据以下命令帮我安装该 skills（全局 · Cursor）：
@@ -16,18 +18,38 @@ npx skills add 15810879921-coder/YunxiaoQA -a cursor -g -y
 依赖：本机需 Python3，以及 pip3 install requests browser_cookie3；Chrome 已登录 devops.aliyun.com。
 ```
 
-或同事自己在终端执行：
+### B. Codex（测试同事常用）
+
+```text
+根据以下命令帮我安装该 skills（全局 · Codex）：
+npx skills add 15810879921-coder/YunxiaoQA -a codex -g -y
+# 若 Codex 仍列不出 YunxiaoQA，再执行保险链接：
+mkdir -p ~/.codex/skills && ln -sfn ~/.agents/skills/yunxiaoqa ~/.codex/skills/yunxiaoqa
+pip3 install requests browser_cookie3
+装完后重启 Codex / 新开会话，说「拉取测试任务」或用 $YunxiaoQA。
+依赖：Node.js（npx）、Python3、Chrome 已登录 devops.aliyun.com。
+```
+
+### C. 终端（多 Agent 一次装齐）
 
 ```bash
-# 推荐：全局装到 Cursor
-npx skills add 15810879921-coder/YunxiaoQA -a cursor -g -y
+# Cursor + Codex（推荐给测试同学）
+npx skills add 15810879921-coder/YunxiaoQA -a cursor -a codex -g -y
+mkdir -p ~/.codex/skills && ln -sfn ~/.agents/skills/yunxiaoqa ~/.codex/skills/yunxiaoqa
+pip3 install requests browser_cookie3
 
-# 同时装 Cursor + Claude Code
-npx skills add 15810879921-coder/YunxiaoQA -a cursor -a claude-code -g -y
-
-# 仅当前项目
-npx skills add 15810879921-coder/YunxiaoQA -a cursor -y
+# 或装到本机检测到的全部 Agent
+npx skills add 15810879921-coder/YunxiaoQA -a '*' -g -y
 ```
+
+### Codex 装不上时怎么自查
+
+| 现象 | 原因 | 处理 |
+|---|---|---|
+| 命令里有 `-a cursor` | 只装 Cursor，不写 Codex | 改用 `-a codex` 或 `-a cursor -a codex` |
+| `npx` / `skills` 报错 | 无 Node.js 或网络拉不下 GitHub | 装 Node 18+；能打开 github.com |
+| skills 显示已安装，Codex 看不到 | CLI 常只落到 `~/.agents/skills/`，而 Codex 用户级目录是 `~/.codex/skills/` | 执行上方 `ln -sfn …` 后**重启 Codex** |
+| 能调起 Skill 但拉云效失败 | 无 Cookie / 无 Python 依赖 | `pip3 install …` + Chrome 登录后 `python3 scripts/refresh_cookies.py --probe` |
 
 更新：
 
