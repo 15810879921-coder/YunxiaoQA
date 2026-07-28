@@ -1,0 +1,12 @@
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
+.env
+*.cookie
+auth-state.json
+/tmp/
+yunxiao_cookies.json
+.idea/
+.vscode/

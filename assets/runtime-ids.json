@@ -1,0 +1,156 @@
+{
+  "schema_version": 1,
+  "skill": "YunxiaoQA",
+  "verified_at": "2026-07-27",
+  "verified_on": "01_ONEOS + DEMO(敏捷研发示例项目)",
+  "note": "测试任务常量。项目 space 须 Plan/口令点选后写入 last_selected；人员优先本文件 people，可回退 YunxiaoPM。禁止把 Cookie 写入本仓库。",
+  "upstream_runtime_ids": "~/.cursor/skills/YunxiaoPM/assets/runtime-ids.json",
+  "people": {
+    "wangmian": {
+      "displayName": "王冕",
+      "identifier": "6811df000601d2fea60144a9",
+      "role": "产品/默认验证者（可按口令改）"
+    },
+    "hefei": {
+      "displayName": "何斐",
+      "identifier": "695f0400562f09713f9c3a93",
+      "role": "【交付】交棒负责人（测试侧一般不改）"
+    },
+    "shenchen": {
+      "displayName": "沈辰",
+      "identifier": "696dd3c191dc4cd471719cfd",
+      "role": "DEMO/常见开发负责人示例"
+    }
+  },
+  "project": {
+    "last_selected": {
+      "name": "敏捷研发示例项目",
+      "spaceIdentifier": "65eca0c2e16a23939081e19e14",
+      "customCode": "DEMO",
+      "organizationIdentifier": "697c54a19df7fdfa65466405",
+      "selected_at": "2026-07-27",
+      "selected_via": "PJ h"
+    }
+  },
+  "task_title_prefixes": {
+    "test": "【测试】",
+    "dev": "【开发】",
+    "delivery": "【交付】"
+  },
+  "workitem_types": {
+    "bug": {
+      "name": "缺陷",
+      "category": "Bug",
+      "identifier": "37da3a07df4d08aef2e3b393",
+      "verified_at": "2026-07-27",
+      "verified_spaces": ["1280be963a5a2cc126a4118dca", "65eca0c2e16a23939081e19e14"]
+    },
+    "task": {
+      "name": "任务",
+      "category": "Task",
+      "identifier": "ba102e46bc6a8483d9b7f25c",
+      "note": "与 YunxiaoPM 一致；【测试】为任务标题前缀"
+    }
+  },
+  "status": {
+    "bug": {
+      "待确认": "28",
+      "处理中": "100010",
+      "已修复": "29",
+      "再次打开": "30",
+      "暂不修复": "31",
+      "已关闭": "100085",
+      "note": "ONEOS/DEMO 缺陷新建默认「待确认」。口令与文档统一用「待确认」；禁止用「待处理」指缺陷（「待处理」仅属任务状态）。DEMO space 65eca0c2e16a23939081e19e14 状态 ID 与 ONEOS 一致（2026-07-27 核对）。"
+    },
+    "task": {
+      "待处理": "100005",
+      "处理中": "100010",
+      "已完成": "100014",
+      "已取消": "141230"
+    },
+    "transit_api": "POST /projex/api/workitem/workitem/{id}/status/transit",
+    "next_status_api": "GET /projex/api/workitem/workitem/{id}/nextStatus/list?currentStatusIdentifier={from}",
+    "known_transitions": {
+      "待确认": ["处理中", "已修复", "暂不修复", "已关闭"],
+      "已修复": ["再次打开", "已关闭"],
+      "再次打开": ["处理中", "已修复", "暂不修复"],
+      "已关闭": ["再次打开"]
+    }
+  },
+  "fields": {
+    "verifier": {
+      "name": "验证者",
+      "propertyKey": "workitem.verifier",
+      "fieldIdentifier": "workitem.verifier",
+      "className": "user",
+      "format": "list",
+      "verified_at": "2026-07-27"
+    },
+    "assignee": {
+      "name": "负责人",
+      "propertyKey": "assignedTo",
+      "fieldIdentifier": "assignedTo",
+      "className": "user"
+    },
+    "sprint": {
+      "propertyKey": "sprint",
+      "operateType": "COVER"
+    },
+    "priority": {
+      "fieldIdentifier": "priority",
+      "紧急": "646004e97f54bb77fec7b455df",
+      "高": "95b89e0a524d9693e1f335ffe5",
+      "中": "fa155d1214f9f8db222d39db3b",
+      "低": "92924feff9c1085891e7511872"
+    },
+    "seriousLevel": {
+      "fieldIdentifier": "seriousLevel",
+      "name": "严重程度",
+      "1-致命": "2236ad2f8e6b1b74491ab23015",
+      "2-严重": "a3519c4be6d5ca8bb755ab391f",
+      "3-一般": "647ee5a979d80379256efb450b",
+      "4-轻微": "ebb2d182bccbb6ab33b4b209f2"
+    },
+    "wont_fix_reason": {
+      "fieldIdentifier": "6cca899b2bb52c17cda170efee",
+      "name": "不修复理由",
+      "note": "流转到暂不修复时可能需要；实写时按 UI 校验补填"
+    },
+    "list_all_fields_api": "GET /projex/api/workitem/workitem/field/listAllFields?spaceType=Project&spaceIdentifier={space}&categoryIdentifier=Bug"
+  },
+  "search": {
+    "list_api": "POST /projex/api/workitem/workitem/list?_input_charset=utf-8",
+    "bug_body_shape": {
+      "spaceIdentifier": "{space}",
+      "category": "Bug",
+      "toPage": 1,
+      "pageSize": 50,
+      "searchType": "LIST",
+      "conditions": "{\"conditionGroups\":[[{\"className\":\"status\",\"fieldIdentifier\":\"status\",\"format\":\"list\",\"operator\":\"CONTAINS\",\"value\":[\"29\"]}]]}"
+    },
+    "task_filter_title_prefix": "【测试】"
+  },
+  "relation": {
+    "bug_to_test_or_delivery": "ASSOCIATED",
+    "test_to_delivery": "TASK_SUB",
+    "note": "与 YunxiaoPM 交付树一致：【测试】应为交付子项；缺陷正式关联【测试】/【交付】/需求"
+  },
+  "assignee_rules": {
+    "本期缺陷": "同交付下【开发】任务负责人；多人 Plan 点选",
+    "非本期缺陷": "口令指定",
+    "验证者": "当前测试人"
+  },
+  "tester_allowed_transitions": [
+    "已修复→已关闭",
+    "已修复→再次打开",
+    "【测试】→已完成"
+  ],
+  "tester_forbidden": [
+    "创建【开发】",
+    "创建【测试】",
+    "创建迭代",
+    "缺陷→已修复",
+    "缺陷→暂不修复",
+    "缺陷→处理中"
+  ]
+}
