@@ -286,12 +286,16 @@ def get_workitem(s: requests.Session, workitem_id: str) -> dict[str, Any]:
     return result
 
 
-def list_associated(
-    s: requests.Session, workitem_id: str, *, forward: bool = True
+def list_relations(
+    s: requests.Session,
+    workitem_id: str,
+    *,
+    category: str,
+    forward: bool = True,
 ) -> list[dict[str, Any]]:
     r = s.get(
         f"https://devops.aliyun.com/projex/api/workitem/v2/workitem/{workitem_id}/relation/workitem/list/by-relation-category",
-        params={"category": "ASSOCIATED", "isForward": str(forward).lower()},
+        params={"category": category, "isForward": str(forward).lower()},
         timeout=45,
     )
     try:
@@ -303,6 +307,114 @@ def list_associated(
     if not isinstance(data, dict):
         return []
     return list(data.get("result") or [])
+
+
+def list_associated(
+    s: requests.Session, workitem_id: str, *, forward: bool = True
+) -> list[dict[str, Any]]:
+    return list_relations(s, workitem_id, category="ASSOCIATED", forward=forward)
+
+
+def list_parent_sub(
+    s: requests.Session, workitem_id: str, *, forward: bool = True
+) -> list[dict[str, Any]]:
+    """forward=True：当前项的子项；forward=False：父项方向。"""
+    return list_relations(s, workitem_id, category="PARENT_SUB", forward=forward)
+
+
+def add_relation(
+    s: requests.Session,
+    workitem_id: str,
+    *,
+    to_workitem_id: str,
+    relation: str = "ASSOCIATED",
+) -> dict[str, Any]:
+    r = s.post(
+        f"https://devops.aliyun.com/projex/api/workitem/workitem/{workitem_id}/relation/record?_input_charset=utf-8",
+        json={
+            "relationIdentifier": relation,
+            "toWorkitemIdentifier": to_workitem_id,
+        },
+        timeout=45,
+    )
+    try:
+        data = r.json()
+    except Exception:
+        data = None
+    _raise_if_auth_failed(r, data)
+    if not isinstance(data, dict):
+        raise RuntimeError(data)
+    return data
+
+
+def _is_req_item(it: dict[str, Any]) -> bool:
+    cat = (it.get("category") or it.get("categoryIdentifier") or "").strip()
+    if cat in ("Req", "Requirement"):
+        return True
+    wtype = it.get("workitemType")
+    if isinstance(wtype, dict):
+        name = (
+            (wtype.get("name") or "")
+            + (wtype.get("displayName") or "")
+            + (wtype.get("identifier") or "")
+        )
+        if "需求" in name or "Req" in name:
+            return True
+    return False
+
+
+def resolve_req_from_test(
+    s: requests.Session, test_id: str
+) -> dict[str, Any] | None:
+    """从【测试】追溯产品需求：自身 ASSOCIATED → 父【交付】ASSOCIATED → 兄弟【开发】ASSOCIATED。"""
+    seen: set[str] = set()
+
+    def pick(items: list[dict[str, Any]]) -> dict[str, Any] | None:
+        for it in items:
+            wid = it.get("identifier")
+            if not wid or wid in seen:
+                continue
+            seen.add(wid)
+            full = it
+            if not _is_req_item(full):
+                try:
+                    full = get_workitem(s, wid)
+                except Exception:
+                    continue
+            if _is_req_item(full):
+                return brief_item(full)
+        return None
+
+    hit = pick(list_associated(s, test_id, forward=True)) or pick(
+        list_associated(s, test_id, forward=False)
+    )
+    if hit:
+        return hit
+
+    parents = list_parent_sub(s, test_id, forward=False)
+    for p in parents:
+        pid = p.get("identifier")
+        if not pid:
+            continue
+        hit = pick(list_associated(s, pid, forward=True)) or pick(
+            list_associated(s, pid, forward=False)
+        )
+        if hit:
+            return hit
+        for child in list_parent_sub(s, pid, forward=True):
+            subj = child.get("subject") or ""
+            if not subj.startswith("【开发】"):
+                continue
+            cid = child.get("identifier")
+            if not cid:
+                continue
+            hit = pick(list_associated(s, cid, forward=True)) or pick(
+                list_associated(s, cid, forward=False)
+            )
+            if hit:
+                return hit
+
+    return None
 
 
 def create_workitem(s: requests.Session, payload: dict[str, Any]) -> dict[str, Any]:

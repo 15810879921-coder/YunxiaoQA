@@ -3,21 +3,14 @@
 
 写操作：须先经 YunxiaoQA Plan 门禁确认后再执行（去掉 --dry-run）。
 
-本期必须 create 时挂 ASSOCIATED（测试任务或交付），创建后强制回读校验；
-校验失败则退出码 3（云效常无法事后补关联）。
+规则（直接发布缺陷 · 强制）：
+1. 必须先挂【测试】任务：缺陷作为【测试】的子项（create 时 parent + TASK_SUB）。
+2. 从【测试】追溯产品需求，ASSOCIATED 挂到缺陷下（口令 --req 可覆盖）。
+3. 子项 / 需求回读校验失败 → 退出码 3。
 
 示例：
-  # 干跑
   python3 scripts/create_bug.py --mode 本期 --title '[验证] …' \\
     --test-task DEMO-90 --assignee 沈辰 --verifier 王冕 --dry-run
-
-  # 实写
-  python3 scripts/create_bug.py --mode 本期 --title '[验证] …' \\
-    --test-task DEMO-90 --assignee 沈辰 --verifier 王冕 \\
-    --description-html '<p>实际…</p><p>期望…</p>'
-
-  python3 scripts/create_bug.py --mode 非本期 --title '…' \\
-    --assignee 沈辰 --verifier 王冕 --description-file ./bug.html
 """
 from __future__ import annotations
 
@@ -30,12 +23,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _auth import (  # noqa: E402
     RUNTIME,
     AuthError,
+    add_relation,
     brief_item,
     create_workitem,
     find_by_serial,
     get_workitem,
     list_associated,
+    list_parent_sub,
     resolve_person,
+    resolve_req_from_test,
     session,
     set_document,
     space_id,
@@ -78,36 +74,50 @@ def default_html(title: str, extra: str | None) -> str:
 """
 
 
-def association_hit(assoc: list[dict], target_id: str) -> bool:
-    return any(x.get("identifier") == target_id for x in assoc)
+def relation_hit(items: list[dict], target_id: str) -> bool:
+    return any(x.get("identifier") == target_id for x in items)
+
+
+def is_sub_of_test(s, bug_id: str, test_id: str) -> bool:
+    """缺陷是否为【测试】子项：父链含测试，或测试子列表含缺陷。"""
+    parents = list_parent_sub(s, bug_id, forward=False)
+    if relation_hit(parents, test_id):
+        return True
+    children = list_parent_sub(s, test_id, forward=True)
+    return relation_hit(children, bug_id)
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="发起缺陷（create + 强制关联校验）")
+    ap = argparse.ArgumentParser(description="发起缺陷（测试子项 + 需求 ASSOCIATED）")
     ap.add_argument("--mode", choices=["本期", "非本期"], required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--assignee", required=True, help="负责人：姓名或 user id")
     ap.add_argument("--verifier", default="王冕", help="验证者：姓名或 user id")
     ap.add_argument("--priority", default="中", choices=list(PRI.keys()))
     ap.add_argument("--severity", default="3-一般", choices=list(SEV.keys()))
-    ap.add_argument("--test-task", default=None, help="如 DEMO-90 / ONEOS-xx")
+    ap.add_argument("--test-task", default=None, help="如 DEMO-90 / ONEOS-xx（本期必填）")
     ap.add_argument("--test-task-id", default=None)
-    ap.add_argument("--delivery", default=None)
+    ap.add_argument("--delivery", default=None, help="仅用于辅助追溯；不能替代测试任务")
     ap.add_argument("--delivery-id", default=None)
-    ap.add_argument("--req", default=None, help="可选：额外 ASSOCIATED 需求编号（仅记录意图；主关联仍用测试/交付）")
+    ap.add_argument(
+        "--req",
+        default=None,
+        help="产品需求编号；缺省则从【测试】/【交付】/【开发】ASSOCIATED 自动拉取",
+    )
+    ap.add_argument("--req-id", default=None)
     ap.add_argument("--description-html", default=None)
     ap.add_argument("--description-file", default=None)
     ap.add_argument("--space", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
-        "--allow-no-associate",
+        "--allow-no-test",
         action="store_true",
-        help="仅非本期可用；本期禁止",
+        help="仅非本期：允许不挂【测试】（无子项、不挂需求）",
     )
     args = ap.parse_args()
 
-    if args.mode == "本期" and args.allow_no_associate:
-        raise SystemExit("本期禁止 --allow-no-associate")
+    if args.mode == "本期" and args.allow_no_test:
+        raise SystemExit("本期禁止 --allow-no-test；必须挂【测试】子项")
 
     html = args.description_html
     if args.description_file:
@@ -128,47 +138,40 @@ def main() -> None:
         print(json.dumps({"ok": False, "error": str(e)}, ensure_ascii=False, indent=2))
         raise SystemExit(2) from e
 
-    associate_meta = None
-    if args.mode == "本期":
-        if not (args.test_task or args.test_task_id or args.delivery or args.delivery_id):
-            raise SystemExit("本期必须提供 --test-task/--test-task-id 或 --delivery/--delivery-id")
-        if args.test_task or args.test_task_id:
-            associate_meta = resolve_target(
-                s,
-                space,
-                sn=args.test_task,
-                wid=args.test_task_id,
-                categories=("Task",),
+    test_meta = None
+    req_meta = None
+    need_test = args.mode == "本期" or not args.allow_no_test
+
+    if need_test:
+        if not (args.test_task or args.test_task_id):
+            raise SystemExit(
+                "发布缺陷必须提供 --test-task/--test-task-id："
+                "缺陷须作为【测试】子项，并挂上从测试任务追溯的需求"
+            )
+        test_meta = resolve_target(
+            s,
+            space,
+            sn=args.test_task,
+            wid=args.test_task_id,
+            categories=("Task",),
+        )
+        subj = test_meta.get("subject") or ""
+        if not subj.startswith("【测试】"):
+            raise SystemExit(
+                f"锚点必须是【测试】任务，当前为：{test_meta.get('serialNumber')} | {subj}"
+            )
+
+        if args.req or args.req_id:
+            req_meta = resolve_target(
+                s, space, sn=args.req, wid=args.req_id, categories=("Req",)
             )
         else:
-            associate_meta = resolve_target(
-                s,
-                space,
-                sn=args.delivery,
-                wid=args.delivery_id,
-                categories=("Task",),
-            )
-    elif args.test_task or args.test_task_id or args.delivery or args.delivery_id:
-        # 非本期也可选挂关联
-        if args.test_task or args.test_task_id:
-            associate_meta = resolve_target(
-                s,
-                space,
-                sn=args.test_task,
-                wid=args.test_task_id,
-                categories=("Task",),
-            )
-        else:
-            associate_meta = resolve_target(
-                s,
-                space,
-                sn=args.delivery,
-                wid=args.delivery_id,
-                categories=("Task",),
-            )
-    elif not args.allow_no_associate and args.mode == "非本期":
-        # 非本期允许无关联，默认即可
-        pass
+            req_meta = resolve_req_from_test(s, test_meta["id"])
+            if not req_meta:
+                raise SystemExit(
+                    "未能从【测试】追溯到产品需求（自身/父交付/兄弟【开发】ASSOCIATED）。"
+                    "请口令补 --req=ONEOS-xx 或先修好测试任务与需求的关联。"
+                )
 
     payload: dict = {
         "subject": args.title,
@@ -192,10 +195,15 @@ def main() -> None:
         "attachmentIdList": [],
         "cloneFrom": None,
     }
-    if associate_meta:
+
+    # create 时挂 TASK_SUB→【测试】（子项）；需求事后 ASSOCIATED（create 仅支持一条关系）
+    if test_meta:
+        tid = test_meta["id"]
+        payload["parent"] = tid
+        payload["parentIdentifier"] = tid
         payload["createWorkitemRelationInfo"] = {
-            "relatedWorkitemIdentifier": associate_meta["id"],
-            "relatedToRelationIdentifier": "ASSOCIATED",
+            "relatedWorkitemIdentifier": tid,
+            "relatedToRelationIdentifier": "TASK_SUB",
         }
 
     plan = {
@@ -206,8 +214,9 @@ def main() -> None:
         "verifier": {"id": verifier_id, "name": verifier_name},
         "priority": args.priority,
         "severity": args.severity,
-        "associateAtCreate": associate_meta,
-        "reqHint": args.req,
+        "testParent": test_meta,
+        "reqAssociated": req_meta,
+        "relationRule": "缺陷 TASK_SUB→【测试】；缺陷 ASSOCIATED→需求（自测试追溯）",
         "dryRun": args.dry_run,
     }
 
@@ -218,32 +227,79 @@ def main() -> None:
     created = create_workitem(s, payload)
     bug_id = created["identifier"]
     set_document(s, bug_id, html)
-    live = brief_item(get_workitem(s, bug_id))
-    assoc = list_associated(s, bug_id, forward=True)
-    assoc_ids = [x.get("serialNumber") or x.get("identifier") for x in assoc]
 
-    assoc_ok = True
-    assoc_error = None
-    if associate_meta:
-        assoc_ok = association_hit(assoc, associate_meta["id"])
-        if not assoc_ok:
-            assoc_error = (
-                "创建后 ASSOCIATED 校验失败：目标未出现在关联列表。"
-                "云效常无法事后补关联（「不能关联相同的工作项」）。"
-                "请删单重试或在 UI 确认 createWorkitemRelationInfo 是否生效。"
+    sub_ok = True
+    sub_error = None
+    if test_meta:
+        sub_ok = is_sub_of_test(s, bug_id, test_meta["id"])
+        if not sub_ok:
+            sub_error = (
+                "创建后【测试】子项校验失败：缺陷未出现在测试任务 PARENT_SUB 下。"
+                "请删单重试；勿仅用 ASSOCIATED 代替子项。"
             )
 
+    req_ok = True
+    req_error = None
+    req_api = None
+    if req_meta:
+        # 优先事后 ASSOCIATED；若已在关联列表则跳过
+        already = list_associated(s, bug_id, forward=True) + list_associated(
+            s, bug_id, forward=False
+        )
+        if relation_hit(already, req_meta["id"]):
+            req_ok = True
+        else:
+            req_api = add_relation(
+                s, bug_id, to_workitem_id=req_meta["id"], relation="ASSOCIATED"
+            )
+            if req_api.get("code") != 200:
+                # 部分环境报「不能关联相同的工作项」但仍可能已有隐式关系：再回读
+                already2 = list_associated(s, bug_id, forward=True) + list_associated(
+                    s, bug_id, forward=False
+                )
+                req_ok = relation_hit(already2, req_meta["id"])
+                if not req_ok:
+                    req_error = (
+                        "需求 ASSOCIATED 失败："
+                        f"{req_api.get('errorMsg') or req_api}。"
+                        "子项若已成功，请在 UI 手工挂需求或删单后带 --req 重试。"
+                    )
+            else:
+                already2 = list_associated(s, bug_id, forward=True)
+                req_ok = relation_hit(already2, req_meta["id"])
+                if not req_ok:
+                    req_error = "需求 ASSOCIATED API 成功但回读未命中，立刻停。"
+
+    live = brief_item(get_workitem(s, bug_id))
+    children_of_test = (
+        [
+            x.get("serialNumber") or x.get("identifier")
+            for x in list_parent_sub(s, test_meta["id"], forward=True)
+        ]
+        if test_meta
+        else []
+    )
+    assoc_ids = [
+        x.get("serialNumber") or x.get("identifier")
+        for x in list_associated(s, bug_id, forward=True)
+    ]
+
+    ok = (sub_ok if test_meta else True) and (req_ok if req_meta else True)
     out = {
-        "ok": assoc_ok if associate_meta else True,
+        "ok": ok,
         "bug": live,
         "plan": plan,
+        "testSubOk": sub_ok if test_meta else None,
+        "testSubError": sub_error,
+        "testChildren": children_of_test,
+        "reqAssociatedOk": req_ok if req_meta else None,
+        "reqAssociatedError": req_error,
+        "reqApi": req_api,
         "associated": assoc_ids,
-        "associatedOk": assoc_ok if associate_meta else None,
-        "associatedError": assoc_error,
-        "note": "创建后禁止依赖 relation/record 补关联；本期必须以 create 挂上",
+        "note": "规则：缺陷=【测试】TASK_SUB 子项 + ASSOCIATED→需求（自测试追溯）",
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
-    if associate_meta and not assoc_ok:
+    if not ok:
         raise SystemExit(3)
 
 

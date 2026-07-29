@@ -25,6 +25,7 @@ from _auth import (  # noqa: E402
     find_by_serial,
     get_workitem,
     list_associated,
+    list_parent_sub,
     session,
     space_id,
     status_id,
@@ -72,11 +73,26 @@ def is_bug_item(it: dict[str, Any]) -> bool:
 
 
 def check_associated_closed(s, workitem_id: str) -> list[dict[str, str]]:
-    """返回未闭环缺陷摘要；空列表=可闭环。"""
+    """返回未闭环缺陷摘要；空列表=可闭环。
+
+    覆盖：【测试】子项（PARENT_SUB）+ ASSOCIATED 双向（兼容旧 ASSOCIATED-only 缺陷）。
+    """
     open_bugs: list[dict[str, str]] = []
-    for it in list_associated(s, workitem_id, forward=True):
+    seen: set[str] = set()
+
+    def consider(it: dict[str, Any]) -> None:
+        wid = it.get("identifier")
+        if not wid or wid in seen:
+            return
+        seen.add(wid)
+        # 列表项可能缺 status：回读
+        if not (it.get("status") or {}).get("displayName") and not is_bug_item(it):
+            try:
+                it = get_workitem(s, wid)
+            except Exception:
+                return
         if not is_bug_item(it):
-            continue
+            return
         st = bug_status_name(it)
         if st not in CLOSED_BUG_STATUSES:
             open_bugs.append(
@@ -86,6 +102,13 @@ def check_associated_closed(s, workitem_id: str) -> list[dict[str, str]]:
                     "status": st or "(空)",
                 }
             )
+
+    for it in list_parent_sub(s, workitem_id, forward=True):
+        consider(it)
+    for it in list_associated(s, workitem_id, forward=True):
+        consider(it)
+    for it in list_associated(s, workitem_id, forward=False):
+        consider(it)
     return open_bugs
 
 

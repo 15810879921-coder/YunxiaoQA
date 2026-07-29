@@ -97,7 +97,7 @@ python3 scripts/refresh_cookies.py --probe
 | 能力 | 状态 |
 |---|---|
 | 拉取【测试】待处理/处理中 | ✅ |
-| 发起缺陷（本期 create 挂 ASSOCIATED + 校验） | ✅ `create_bug.py` |
+| 发起缺陷（【测试】子项 + 挂需求） | ✅ `create_bug.py` |
 | 发起缺陷（非本期） | ✅ |
 | 已修复→已关闭 / 再次打开 | ✅ `transit_bug.py` |
 | 闭环【测试】 | ✅ `close_test_task.py`（`--sn` + 回读；禁止浏览器点状态） |

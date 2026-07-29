@@ -7,7 +7,7 @@
 | `refresh_cookies.py` | 从本机 Chrome 导出 Cookie → `/tmp/yunxiao_cookies.json` |
 | `list_test_tasks.py` | 拉【测试】待处理/处理中 |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
-| `create_bug.py` | **发起缺陷**（本期强制 create 时 ASSOCIATED + 回读校验） |
+| `create_bug.py` | **发起缺陷**（强制：【测试】TASK_SUB 子项 + ASSOCIATED→需求） |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭 / 再次打开（含编号回读） |
 | `close_test_task.py` | **闭环【测试】**：待处理\|处理中→已完成（`--sn` 精确匹配 + 回读） |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |

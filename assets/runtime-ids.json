@@ -131,9 +131,10 @@
     "task_filter_title_prefix": "【测试】"
   },
   "relation": {
-    "bug_to_test_or_delivery": "ASSOCIATED",
+    "bug_to_test": "TASK_SUB",
+    "bug_to_req": "ASSOCIATED",
     "test_to_delivery": "TASK_SUB",
-    "note": "与 YunxiaoPM 交付树一致：【测试】应为交付子项；缺陷正式关联【测试】/【交付】/需求"
+    "note": "缺陷必须是【测试】子项（TASK_SUB）；并从测试任务追溯需求后 ASSOCIATED→需求。勿仅用 ASSOCIATED 代替子项。"
   },
   "assignee_rules": {
     "本期缺陷": "同交付下【开发】任务负责人；多人 Plan 点选",
