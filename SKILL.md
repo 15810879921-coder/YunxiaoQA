@@ -37,7 +37,7 @@ description: >-
 
 ```text
 【测试】= 交付子项（TASK_SUB→【交付】）；由开发 Skill 在提测时创建（本 Skill 不建）
-缺陷     = Bug；**必须**为【测试】子项（TASK_SUB→【测试】）；并 ASSOCIATED→产品需求（从测试任务追溯）
+缺陷     = Bug；**必须** ASSOCIATED→【测试】（关联项，非父子）；并 ASSOCIATED→产品需求（从测试任务追溯）
 验证者   = workitem.verifier；本期负责人=同交付【开发】负责人
 缺陷打开态 = 待确认（禁止再用「待处理」指缺陷）
 查重/复用 = 优先编号；禁止只按模糊标题瞎改他人单
@@ -110,10 +110,9 @@ description: >-
 5. **字段**：验证者=当前测试人；本期负责人=同交付【开发】负责人（多人 Plan 点选）；非本期负责人=口令必填
 5b. **挂载点选（强制）**：口令未给出唯一 `测试任务=` / `需求=` 时，先跑 `list_bug_anchors.py`，用 **AskQuestion**（或字母表）点选【测试】再点选需求；未点选禁止 create。详见 [anchor-selection.md](references/anchor-selection.md)。
 6. **关联（强制）**：
-   - 缺陷 **create 时**挂 `TASK_SUB→【测试】`（`parent` + `createWorkitemRelationInfo`），作为测试任务**子项**；回读 PARENT_SUB 校验。
-   - 从【测试】追溯产品需求（测试自身 / 父【交付】 / 兄弟【开发】的 ASSOCIATED），再 `ASSOCIATED→需求` 挂到缺陷；口令 `需求=` / `--req` 可覆盖；**点选确认后的编号**才写入脚本。
-   - **禁止**只用 ASSOCIATED 挂测试、不建子项；**禁止**依赖事后补「测试关联」当子项。
-7. Plan 回显 → 确认 → apply（`create_bug.py`）→ 回读子项+需求 → 回报；校验失败（退出码 3）须停
+   - 缺陷 **create 时**挂 `ASSOCIATED→【测试】`（关联项；**禁止** TASK_SUB/父子——云效类型约束不允许缺陷作任务子项）；回读 ASSOCIATED 校验。
+   - 从【测试】追溯产品需求，再 `ASSOCIATED→需求`（bug→req，失败则 req→bug）；口令 `需求=` / `--req` 可覆盖；**点选确认后的编号**才写入脚本。
+7. Plan 回显 → 确认 → apply（`create_bug.py`）→ 回读测试关联+需求 → 回报；校验失败（退出码 3）须停
 
 ## 本 Skill 终点与明确不做
 

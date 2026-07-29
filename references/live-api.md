@@ -88,8 +88,8 @@ POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 - 优先级 / 严重程度：见 runtime-ids `fields.priority` / `seriousLevel`
 - 描述：`PATCH …/workitem/{id}/document`，`{"content":"<html>","formatType":"RICHTEXT"}`
 - **本期关联（强制）**：
-  1. `parent` + `createWorkitemRelationInfo.relatedToRelationIdentifier=TASK_SUB` →【测试】（子项）；回读 PARENT_SUB
-  2. 从【测试】追溯需求后 `POST …/relation/record` `ASSOCIATED`→需求；回读 ASSOCIATED
+  1. `createWorkitemRelationInfo` = `ASSOCIATED` →【测试】；回读 ASSOCIATED（**勿用 TASK_SUB/父子**）
+  2. 再 `ASSOCIATED`→需求（bug→req，失败则 req→bug）；回读
   3. 任一失败 → 脚本退出码 3
 
 新建默认状态一般为 **待确认**。

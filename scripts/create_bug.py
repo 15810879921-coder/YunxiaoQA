@@ -4,9 +4,9 @@
 写操作：须先经 YunxiaoQA Plan 门禁确认后再执行（去掉 --dry-run）。
 
 规则（直接发布缺陷 · 强制）：
-1. 必须先挂【测试】任务：缺陷作为【测试】的子项（create 时 parent + TASK_SUB）。
-2. 从【测试】追溯产品需求，ASSOCIATED 挂到缺陷下（口令 --req 可覆盖）。
-3. 子项 / 需求回读校验失败 → 退出码 3。
+1. create 时 ASSOCIATED→【测试】（关联项；云效不允许缺陷作任务子项）。
+2. 从【测试】追溯产品需求，尽力 ASSOCIATED→需求（口令 --req 可覆盖；双向尝试）。
+3. 【测试】关联回读失败 → 退出码 3。需求因云效「不能关联相同的工作项」挂不上时：写入描述备注 + 告警，不阻断（exit 0）。
 
 示例：
   python3 scripts/create_bug.py --mode 本期 --title '[验证] …' \\
@@ -29,7 +29,6 @@ from _auth import (  # noqa: E402
     find_by_serial,
     get_workitem,
     list_associated,
-    list_parent_sub,
     resolve_person,
     resolve_req_from_test,
     session,
@@ -78,17 +77,30 @@ def relation_hit(items: list[dict], target_id: str) -> bool:
     return any(x.get("identifier") == target_id for x in items)
 
 
-def is_sub_of_test(s, bug_id: str, test_id: str) -> bool:
-    """缺陷是否为【测试】子项：父链含测试，或测试子列表含缺陷。"""
-    parents = list_parent_sub(s, bug_id, forward=False)
-    if relation_hit(parents, test_id):
-        return True
-    children = list_parent_sub(s, test_id, forward=True)
-    return relation_hit(children, bug_id)
+def has_associated(s, a_id: str, b_id: str) -> bool:
+    both = list_associated(s, a_id, forward=True) + list_associated(s, a_id, forward=False)
+    return relation_hit(both, b_id)
+
+
+def ensure_associated(s, from_id: str, to_id: str) -> tuple[bool, dict | None, str | None]:
+    """尝试双向挂 ASSOCIATED。返回 (ok, last_api, error)。"""
+    if has_associated(s, from_id, to_id):
+        return True, None, None
+    api1 = add_relation(s, from_id, to_workitem_id=to_id, relation="ASSOCIATED")
+    if has_associated(s, from_id, to_id):
+        return True, api1, None
+    api2 = add_relation(s, to_id, to_workitem_id=from_id, relation="ASSOCIATED")
+    if has_associated(s, from_id, to_id) or has_associated(s, to_id, from_id):
+        return True, {"forward": api1, "reverse": api2}, None
+    err = (
+        f"ASSOCIATED 失败 forward={api1.get('errorMsg') or api1.get('code')} "
+        f"reverse={api2.get('errorMsg') or api2.get('code')}"
+    )
+    return False, {"forward": api1, "reverse": api2}, err
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="发起缺陷（测试子项 + 需求 ASSOCIATED）")
+    ap = argparse.ArgumentParser(description="发起缺陷（ASSOCIATED→【测试】+ 需求）")
     ap.add_argument("--mode", choices=["本期", "非本期"], required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--assignee", required=True, help="负责人：姓名或 user id")
@@ -112,12 +124,12 @@ def main() -> None:
     ap.add_argument(
         "--allow-no-test",
         action="store_true",
-        help="仅非本期：允许不挂【测试】（无子项、不挂需求）",
+        help="仅非本期：允许不挂【测试】",
     )
     args = ap.parse_args()
 
     if args.mode == "本期" and args.allow_no_test:
-        raise SystemExit("本期禁止 --allow-no-test；必须挂【测试】子项")
+        raise SystemExit("本期禁止 --allow-no-test；必须 ASSOCIATED→【测试】")
 
     html = args.description_html
     if args.description_file:
@@ -146,7 +158,7 @@ def main() -> None:
         if not (args.test_task or args.test_task_id):
             raise SystemExit(
                 "发布缺陷必须提供 --test-task/--test-task-id："
-                "缺陷须作为【测试】子项，并挂上从测试任务追溯的需求"
+                "缺陷须 ASSOCIATED 关联对应编号的【测试】，并挂上需求"
             )
         test_meta = resolve_target(
             s,
@@ -169,7 +181,7 @@ def main() -> None:
             req_meta = resolve_req_from_test(s, test_meta["id"])
             if not req_meta:
                 raise SystemExit(
-                    "未能从【测试】追溯到产品需求（自身/父交付/兄弟【开发】ASSOCIATED）。"
+                    "未能从【测试】追溯到产品需求。"
                     "请口令补 --req=ONEOS-xx 或先修好测试任务与需求的关联。"
                 )
 
@@ -196,14 +208,11 @@ def main() -> None:
         "cloneFrom": None,
     }
 
-    # create 时挂 TASK_SUB→【测试】（子项）；需求事后 ASSOCIATED（create 仅支持一条关系）
+    # create 时挂 ASSOCIATED→【测试】（关联项）；需求事后补挂
     if test_meta:
-        tid = test_meta["id"]
-        payload["parent"] = tid
-        payload["parentIdentifier"] = tid
         payload["createWorkitemRelationInfo"] = {
-            "relatedWorkitemIdentifier": tid,
-            "relatedToRelationIdentifier": "TASK_SUB",
+            "relatedWorkitemIdentifier": test_meta["id"],
+            "relatedToRelationIdentifier": "ASSOCIATED",
         }
 
     plan = {
@@ -214,9 +223,9 @@ def main() -> None:
         "verifier": {"id": verifier_id, "name": verifier_name},
         "priority": args.priority,
         "severity": args.severity,
-        "testParent": test_meta,
+        "testAssociated": test_meta,
         "reqAssociated": req_meta,
-        "relationRule": "缺陷 TASK_SUB→【测试】；缺陷 ASSOCIATED→需求（自测试追溯）",
+        "relationRule": "缺陷 ASSOCIATED→【测试】（关联项）；再 ASSOCIATED→需求",
         "dryRun": args.dry_run,
     }
 
@@ -228,75 +237,54 @@ def main() -> None:
     bug_id = created["identifier"]
     set_document(s, bug_id, html)
 
-    sub_ok = True
-    sub_error = None
+    test_ok = True
+    test_error = None
     if test_meta:
-        sub_ok = is_sub_of_test(s, bug_id, test_meta["id"])
-        if not sub_ok:
-            sub_error = (
-                "创建后【测试】子项校验失败：缺陷未出现在测试任务 PARENT_SUB 下。"
-                "请删单重试；勿仅用 ASSOCIATED 代替子项。"
+        test_ok = has_associated(s, bug_id, test_meta["id"])
+        if not test_ok:
+            test_error = (
+                "创建后未回读到 ASSOCIATED→【测试】。"
+                "请删单重试；create 须在 createWorkitemRelationInfo 挂 ASSOCIATED。"
             )
 
     req_ok = True
     req_error = None
     req_api = None
+    req_warn = None
     if req_meta:
-        # 优先事后 ASSOCIATED；若已在关联列表则跳过
-        already = list_associated(s, bug_id, forward=True) + list_associated(
-            s, bug_id, forward=False
-        )
-        if relation_hit(already, req_meta["id"]):
-            req_ok = True
-        else:
-            req_api = add_relation(
-                s, bug_id, to_workitem_id=req_meta["id"], relation="ASSOCIATED"
+        req_ok, req_api, req_error = ensure_associated(s, bug_id, req_meta["id"])
+        if not req_ok:
+            # 云效常无法在已有 ASSOCIATED→测试 后再挂需求：备注 + 告警，不阻断主路径
+            note_html = (
+                html
+                + f"<p><b>关联需求（API 未能挂上）</b>：{req_meta.get('serialNumber')} "
+                f"{req_meta.get('subject')}</p>"
             )
-            if req_api.get("code") != 200:
-                # 部分环境报「不能关联相同的工作项」但仍可能已有隐式关系：再回读
-                already2 = list_associated(s, bug_id, forward=True) + list_associated(
-                    s, bug_id, forward=False
-                )
-                req_ok = relation_hit(already2, req_meta["id"])
-                if not req_ok:
-                    req_error = (
-                        "需求 ASSOCIATED 失败："
-                        f"{req_api.get('errorMsg') or req_api}。"
-                        "子项若已成功，请在 UI 手工挂需求或删单后带 --req 重试。"
-                    )
-            else:
-                already2 = list_associated(s, bug_id, forward=True)
-                req_ok = relation_hit(already2, req_meta["id"])
-                if not req_ok:
-                    req_error = "需求 ASSOCIATED API 成功但回读未命中，立刻停。"
+            set_document(s, bug_id, note_html)
+            req_warn = req_error or "需求 ASSOCIATED 未挂上（已写入描述备注）"
+            req_error = None
+            req_ok = True  # 不阻断；测试关联才是硬门禁
 
     live = brief_item(get_workitem(s, bug_id))
-    children_of_test = (
-        [
-            x.get("serialNumber") or x.get("identifier")
-            for x in list_parent_sub(s, test_meta["id"], forward=True)
-        ]
-        if test_meta
-        else []
-    )
     assoc_ids = [
         x.get("serialNumber") or x.get("identifier")
         for x in list_associated(s, bug_id, forward=True)
+        + list_associated(s, bug_id, forward=False)
     ]
 
-    ok = (sub_ok if test_meta else True) and (req_ok if req_meta else True)
+    ok = test_ok if test_meta else True
     out = {
         "ok": ok,
         "bug": live,
         "plan": plan,
-        "testSubOk": sub_ok if test_meta else None,
-        "testSubError": sub_error,
-        "testChildren": children_of_test,
-        "reqAssociatedOk": req_ok if req_meta else None,
+        "testAssociatedOk": test_ok if test_meta else None,
+        "testAssociatedError": test_error,
+        "reqAssociatedOk": None if not req_meta else (req_warn is None),
         "reqAssociatedError": req_error,
+        "reqAssociatedWarning": req_warn,
         "reqApi": req_api,
         "associated": assoc_ids,
-        "note": "规则：缺陷=【测试】TASK_SUB 子项 + ASSOCIATED→需求（自测试追溯）",
+        "note": "硬门禁：ASSOCIATED→【测试】；需求尽力挂，失败则描述备注+告警",
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
     if not ok:

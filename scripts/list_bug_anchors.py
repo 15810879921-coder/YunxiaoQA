@@ -178,7 +178,7 @@ def main() -> None:
         "ok": True,
         "space": space,
         "gate": args.gate,
-        "rule": "缺陷须 TASK_SUB→【测试】；再 ASSOCIATED→需求。未点选禁止 create。",
+        "rule": "缺陷须 ASSOCIATED→【测试】；再 ASSOCIATED→需求。未点选禁止 create。",
         "askQuestionPreferred": True,
     }
 
@@ -202,7 +202,7 @@ def main() -> None:
             "suggestedLetter": "a" if match_state == "unique" and options else None,
             "askQuestion": {
                 "id": "test_task",
-                "prompt": "挂载点选 · 【测试】任务（缺陷将成为其子项）",
+                "prompt": "挂载点选 · 【测试】任务（缺陷将 ASSOCIATED 关联此项）",
                 "options": options,
             },
             "letters": letter_map,

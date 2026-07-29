@@ -494,24 +494,52 @@ def find_by_serial(
     s: requests.Session, *, space: str, category: str, serial: str
 ) -> dict[str, Any] | None:
     sn = serial.strip()
-    conditions = [
-        [
-            {
-                "className": "string",
-                "fieldIdentifier": "serialNumber",
-                "format": "input",
-                "operator": "CONTAINS",
-                "value": [sn],
-            }
-        ]
-    ]
-    data = post_list(s, category=category, space=space, conditions=conditions, page_size=20)
-    for it in data.get("result") or []:
-        if it.get("serialNumber") == sn:
-            return it
-    # 无前缀纯数字时再扫一页
-    data = post_list(s, category=category, space=space, page_size=100)
-    for it in data.get("result") or []:
-        if it.get("serialNumber") == sn:
-            return it
+    bare = sn.split("-")[-1] if "-" in sn else sn
+
+    def hit(it: dict[str, Any]) -> bool:
+        raw = it.get("serialNumber")
+        if raw is None:
+            return False
+        if str(raw) == sn or str(raw) == bare:
+            return True
+        if isinstance(raw, int) and bare.isdigit() and raw == int(bare):
+            return True
+        sraw = str(raw)
+        if sraw.upper() == sn.upper():
+            return True
+        if "-" in sraw and sraw.split("-")[-1] == bare:
+            return True
+        return False
+
+    # 先无条件扫一页（避免「编号搜索不合法」）；精确匹配
+    try:
+        data = post_list(s, category=category, space=space, page_size=100)
+        for it in data.get("result") or []:
+            if hit(it):
+                return it
+    except Exception:
+        pass
+
+    # 带项目前缀的完整编号偶发可用 CONTAINS
+    if "-" in sn:
+        try:
+            conditions = [
+                [
+                    {
+                        "className": "string",
+                        "fieldIdentifier": "serialNumber",
+                        "format": "input",
+                        "operator": "CONTAINS",
+                        "value": [sn],
+                    }
+                ]
+            ]
+            data = post_list(
+                s, category=category, space=space, conditions=conditions, page_size=50
+            )
+            for it in data.get("result") or []:
+                if hit(it):
+                    return it
+        except Exception:
+            pass
     return None
