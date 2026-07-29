@@ -87,10 +87,9 @@ POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 - 验证者：`workitem.verifier`（user id）
 - 优先级 / 严重程度：见 runtime-ids `fields.priority` / `seriousLevel`
 - 描述：`PATCH …/workitem/{id}/document`，`{"content":"<html>","formatType":"RICHTEXT"}`
-- **本期关联（强制）**：
-  1. `createWorkitemRelationInfo` = `ASSOCIATED` →【测试】；回读 ASSOCIATED（**勿用 TASK_SUB/父子**）
-  2. 再 `ASSOCIATED`→需求（bug→req，失败则 req→bug）；回读
-  3. 任一失败 → 脚本退出码 3
+- **本期关联**：
+  1. `createWorkitemRelationInfo` = `ASSOCIATED` →【测试】；回读 ASSOCIATED（**勿用 TASK_SUB/父子**）；失败 → 退出码 3
+  2. 产品需求：写入描述「追溯需求」段；**不做**事后 `ASSOCIATED→需求`（Cookie 第二挂常报「不能关联相同的工作项」；已去掉告警+伪备注口径）
 
 新建默认状态一般为 **待确认**。
 
@@ -98,7 +97,7 @@ POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 
 关联：`POST /projex/api/workitem/workitem/{id}/relation/record`（`ASSOCIATED` 等，与 YunxiaoPM 一致）。
 
-**注意：** 缺陷对【测试】/交付的 ASSOCIATED **应在 create 时挂上**；事后 `relation/record` 在 DEMO/ONEOS 常报「不能关联相同的工作项」，不可作为主路径。
+**注意：** 缺陷对【测试】的 ASSOCIATED **必须在 create 时挂上**；事后 `relation/record` 在 DEMO/ONEOS 常报「不能关联相同的工作项」，不可作为主路径。需求 API 第二挂本期不做（UI/OpenAPI `pt-` 令牌另议）。
 
 挂迭代：
 

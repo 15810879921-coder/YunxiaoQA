@@ -32,10 +32,10 @@
 ### 发起缺陷（本期）
 
 - 必填：标题、描述；`测试任务=` 可口令给出，**未给出或非唯一命中则挂载点选**。
-- **挂载点选（强制）**：`list_bug_anchors.py` → AskQuestion 点选【测试】→ 再点选需求。见 [anchor-selection.md](anchor-selection.md)。
-- **关联规则（强制）**：
-  1. 缺陷 `ASSOCIATED` 关联该【测试】编号（关联项，非父子）；
-  2. 点选/确认的产品需求 ASSOCIATED 到缺陷。
+- **挂载点选**：`list_bug_anchors.py` → AskQuestion 点选【测试】；需求可选点选写入描述追溯。见 [anchor-selection.md](anchor-selection.md)。
+- **关联规则**：
+  1. 缺陷 `ASSOCIATED` 关联该【测试】编号（关联项，非父子）——硬门禁；
+  2. 产品需求写入描述「追溯需求」；**不做** ASSOCIATED API（本期）。
 - 验证者：当前测试人。
 - 负责人：同交付下【开发】任务负责人；多条 → Plan 点选；口令 `负责人=` 优先。
 - 必须走 SKILL「发起缺陷流水线」+ `create_bug.py`。

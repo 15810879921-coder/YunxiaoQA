@@ -473,12 +473,41 @@ def transit(
     return data
 
 
+def format_serial(item: dict[str, Any]) -> str | None:
+    """list/get 偶发返回裸数字；拼成 DEMO-126 / ONEOS-xx。"""
+    raw = item.get("serialNumber")
+    if raw is None:
+        return None
+    s = str(raw).strip()
+    if not s:
+        return None
+    if "-" in s:
+        return s
+    space = item.get("space")
+    code = None
+    if isinstance(space, dict):
+        code = space.get("customCode") or space.get("name")
+    if not code:
+        # 回退当前会话项目
+        try:
+            code = (RUNTIME.get("project") or {}).get("last_selected", {}).get(
+                "customCode"
+            )
+        except Exception:
+            code = None
+    if code and s.isdigit():
+        return f"{code}-{s}"
+    return s
+
+
 def brief_item(item: dict[str, Any]) -> dict[str, Any]:
-    st = item.get("status") or {}
+    st = item.get("status") or item.get("workitemStatus") or {}
+    if not isinstance(st, dict):
+        st = {}
     assigned = item.get("assignedTo") or item.get("assignedToUser") or {}
     return {
         "id": item.get("identifier"),
-        "serialNumber": item.get("serialNumber"),
+        "serialNumber": format_serial(item),
         "subject": item.get("subject"),
         "status": st.get("displayName") or st.get("name"),
         "statusId": st.get("identifier"),

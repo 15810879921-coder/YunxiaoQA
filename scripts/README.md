@@ -8,7 +8,7 @@
 | `list_bug_anchors.py` | **挂载点选**：【测试】/需求字母表 + AskQuestion 载荷 |
 | `list_test_tasks.py` | 拉【测试】待处理/处理中 |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
-| `create_bug.py` | **发起缺陷**（强制：ASSOCIATED→【测试】+ ASSOCIATED→需求） |
+| `create_bug.py` | **发起缺陷**（强制 ASSOCIATED→【测试】；需求写入描述追溯） |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭 / 再次打开（含编号回读） |
 | `close_test_task.py` | **闭环【测试】**：待处理\|处理中→已完成（`--sn` 精确匹配 + 回读） |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |

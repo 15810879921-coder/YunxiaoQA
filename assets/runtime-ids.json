@@ -134,7 +134,7 @@
     "bug_to_test": "ASSOCIATED",
     "bug_to_req": "ASSOCIATED",
     "test_to_delivery": "TASK_SUB",
-    "note": "缺陷用关联项 ASSOCIATED→【测试】（不能做任务子项）；再 ASSOCIATED→需求。create 时优先挂测试。"
+    "note": "缺陷 ASSOCIATED→【测试】（不能做任务子项）；需求写入描述追溯，不做 API 第二挂。"
   },
   "assignee_rules": {
     "本期缺陷": "同交付下【开发】任务负责人；多人 Plan 点选",

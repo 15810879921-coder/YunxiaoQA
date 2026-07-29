@@ -39,7 +39,12 @@ CLOSED_BUG_STATUSES = {"暂不修复", "已关闭"}
 
 
 def bug_status_name(it: dict[str, Any]) -> str:
-    st = it.get("status") or {}
+    """关联列表常用 workitemStatus；get_workitem 用 status。"""
+    st = it.get("status") or it.get("workitemStatus") or {}
+    if isinstance(st, str):
+        return st.strip()
+    if not isinstance(st, dict):
+        return ""
     return (st.get("displayName") or st.get("name") or "").strip()
 
 
@@ -85,8 +90,8 @@ def check_associated_closed(s, workitem_id: str) -> list[dict[str, str]]:
         if not wid or wid in seen:
             return
         seen.add(wid)
-        # 列表项可能缺 status：回读
-        if not (it.get("status") or {}).get("displayName") and not is_bug_item(it):
+        # 关联列表常只有 workitemStatus / 缺 category：无可用状态名时强制回读
+        if not bug_status_name(it):
             try:
                 it = get_workitem(s, wid)
             except Exception:
@@ -97,7 +102,7 @@ def check_associated_closed(s, workitem_id: str) -> list[dict[str, str]]:
         if st not in CLOSED_BUG_STATUSES:
             open_bugs.append(
                 {
-                    "serialNumber": it.get("serialNumber") or "",
+                    "serialNumber": str(it.get("serialNumber") or ""),
                     "subject": it.get("subject") or "",
                     "status": st or "(空)",
                 }
@@ -218,23 +223,29 @@ def main() -> None:
     line = report_line(str(after_sn), after_sub, from_name, str(after_st))
 
     if after_sn != sn:
-        print(
-            json.dumps(
-                {
-                    "ok": False,
-                    "error": "serial_mismatch",
-                    "expected": sn,
-                    "actual": after_sn,
-                    "report": line,
-                    "before": meta,
-                    "after": after,
-                    "hint": "编号回读失败：立刻停；禁止继续用浏览器补救",
-                },
-                ensure_ascii=False,
-                indent=2,
+        # get_workitem 偶发裸数字；与 DEMO-126 / 126 等价
+        def _bare(x: object) -> str:
+            t = str(x or "")
+            return t.split("-")[-1] if "-" in t else t
+
+        if not (_bare(after_sn) and _bare(after_sn) == _bare(sn)):
+            print(
+                json.dumps(
+                    {
+                        "ok": False,
+                        "error": "serial_mismatch",
+                        "expected": sn,
+                        "actual": after_sn,
+                        "report": line,
+                        "before": meta,
+                        "after": after,
+                        "hint": "编号回读失败：立刻停；禁止继续用浏览器补救",
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
             )
-        )
-        raise SystemExit(3)
+            raise SystemExit(3)
 
     if after_st != TARGET:
         print(

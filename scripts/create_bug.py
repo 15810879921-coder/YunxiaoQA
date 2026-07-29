@@ -3,10 +3,11 @@
 
 写操作：须先经 YunxiaoQA Plan 门禁确认后再执行（去掉 --dry-run）。
 
-规则（直接发布缺陷 · 强制）：
-1. create 时 ASSOCIATED→【测试】（关联项；云效不允许缺陷作任务子项）。
-2. 从【测试】追溯产品需求，尽力 ASSOCIATED→需求（口令 --req 可覆盖；双向尝试）。
-3. 【测试】关联回读失败 → 退出码 3。需求因云效「不能关联相同的工作项」挂不上时：写入描述备注 + 告警，不阻断（exit 0）。
+规则：
+1. create 时 ASSOCIATED→【测试】（关联项；云效不允许缺陷作任务子项）——硬门禁，回读失败退出码 3。
+2. 产品需求：点选/追溯后**写入描述作追溯记录**；本期不做 Cookie 事后 ASSOCIATED
+   （第二挂常报「不能关联相同的工作项」；勿告警、勿伪造成功备注）。
+3. 口令 --req 可覆盖自动追溯；点选确认后的编号才写入。
 
 示例：
   python3 scripts/create_bug.py --mode 本期 --title '[验证] …' \\
@@ -23,7 +24,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _auth import (  # noqa: E402
     RUNTIME,
     AuthError,
-    add_relation,
     brief_item,
     create_workitem,
     find_by_serial,
@@ -82,25 +82,17 @@ def has_associated(s, a_id: str, b_id: str) -> bool:
     return relation_hit(both, b_id)
 
 
-def ensure_associated(s, from_id: str, to_id: str) -> tuple[bool, dict | None, str | None]:
-    """尝试双向挂 ASSOCIATED。返回 (ok, last_api, error)。"""
-    if has_associated(s, from_id, to_id):
-        return True, None, None
-    api1 = add_relation(s, from_id, to_workitem_id=to_id, relation="ASSOCIATED")
-    if has_associated(s, from_id, to_id):
-        return True, api1, None
-    api2 = add_relation(s, to_id, to_workitem_id=from_id, relation="ASSOCIATED")
-    if has_associated(s, from_id, to_id) or has_associated(s, to_id, from_id):
-        return True, {"forward": api1, "reverse": api2}, None
-    err = (
-        f"ASSOCIATED 失败 forward={api1.get('errorMsg') or api1.get('code')} "
-        f"reverse={api2.get('errorMsg') or api2.get('code')}"
-    )
-    return False, {"forward": api1, "reverse": api2}, err
+def append_req_trace(html: str, req_meta: dict) -> str:
+    """描述内追溯需求（非 ASSOCIATION API）。"""
+    sn = req_meta.get("serialNumber") or ""
+    subj = req_meta.get("subject") or ""
+    return html + f"<h2>追溯需求</h2><p>{sn} {subj}</p>"
 
 
 def main() -> None:
-    ap = argparse.ArgumentParser(description="发起缺陷（ASSOCIATED→【测试】+ 需求）")
+    ap = argparse.ArgumentParser(
+        description="发起缺陷（ASSOCIATED→【测试】；需求写入描述追溯）"
+    )
     ap.add_argument("--mode", choices=["本期", "非本期"], required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--assignee", required=True, help="负责人：姓名或 user id")
@@ -114,7 +106,7 @@ def main() -> None:
     ap.add_argument(
         "--req",
         default=None,
-        help="产品需求编号；缺省则从【测试】/【交付】/【开发】ASSOCIATED 自动拉取",
+        help="产品需求编号（写入描述追溯；不做 ASSOCIATED）；缺省从【测试】追溯",
     )
     ap.add_argument("--req-id", default=None)
     ap.add_argument("--description-html", default=None)
@@ -158,7 +150,7 @@ def main() -> None:
         if not (args.test_task or args.test_task_id):
             raise SystemExit(
                 "发布缺陷必须提供 --test-task/--test-task-id："
-                "缺陷须 ASSOCIATED 关联对应编号的【测试】，并挂上需求"
+                "缺陷须 ASSOCIATED 关联对应编号的【测试】"
             )
         test_meta = resolve_target(
             s,
@@ -179,11 +171,10 @@ def main() -> None:
             )
         else:
             req_meta = resolve_req_from_test(s, test_meta["id"])
-            if not req_meta:
-                raise SystemExit(
-                    "未能从【测试】追溯到产品需求。"
-                    "请口令补 --req=ONEOS-xx 或先修好测试任务与需求的关联。"
-                )
+            # 追溯不到不阻断：仅无需求描述段；仍可 Plan 补 --req
+
+    if req_meta:
+        html = append_req_trace(html, req_meta)
 
     payload: dict = {
         "subject": args.title,
@@ -208,7 +199,7 @@ def main() -> None:
         "cloneFrom": None,
     }
 
-    # create 时挂 ASSOCIATED→【测试】（关联项）；需求事后补挂
+    # create 时仅挂 ASSOCIATED→【测试】
     if test_meta:
         payload["createWorkitemRelationInfo"] = {
             "relatedWorkitemIdentifier": test_meta["id"],
@@ -224,8 +215,8 @@ def main() -> None:
         "priority": args.priority,
         "severity": args.severity,
         "testAssociated": test_meta,
-        "reqAssociated": req_meta,
-        "relationRule": "缺陷 ASSOCIATED→【测试】（关联项）；再 ASSOCIATED→需求",
+        "reqTrace": req_meta,
+        "relationRule": "ASSOCIATED→【测试】；需求仅描述追溯（不做 API 第二挂）",
         "dryRun": args.dry_run,
     }
 
@@ -247,24 +238,6 @@ def main() -> None:
                 "请删单重试；create 须在 createWorkitemRelationInfo 挂 ASSOCIATED。"
             )
 
-    req_ok = True
-    req_error = None
-    req_api = None
-    req_warn = None
-    if req_meta:
-        req_ok, req_api, req_error = ensure_associated(s, bug_id, req_meta["id"])
-        if not req_ok:
-            # 云效常无法在已有 ASSOCIATED→测试 后再挂需求：备注 + 告警，不阻断主路径
-            note_html = (
-                html
-                + f"<p><b>关联需求（API 未能挂上）</b>：{req_meta.get('serialNumber')} "
-                f"{req_meta.get('subject')}</p>"
-            )
-            set_document(s, bug_id, note_html)
-            req_warn = req_error or "需求 ASSOCIATED 未挂上（已写入描述备注）"
-            req_error = None
-            req_ok = True  # 不阻断；测试关联才是硬门禁
-
     live = brief_item(get_workitem(s, bug_id))
     assoc_ids = [
         x.get("serialNumber") or x.get("identifier")
@@ -279,12 +252,9 @@ def main() -> None:
         "plan": plan,
         "testAssociatedOk": test_ok if test_meta else None,
         "testAssociatedError": test_error,
-        "reqAssociatedOk": None if not req_meta else (req_warn is None),
-        "reqAssociatedError": req_error,
-        "reqAssociatedWarning": req_warn,
-        "reqApi": req_api,
+        "reqTrace": req_meta,
         "associated": assoc_ids,
-        "note": "硬门禁：ASSOCIATED→【测试】；需求尽力挂，失败则描述备注+告警",
+        "note": "硬门禁：ASSOCIATED→【测试】；需求写入描述追溯，不做 ASSOCIATED API",
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
     if not ok:

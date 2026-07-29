@@ -178,7 +178,7 @@ def main() -> None:
         "ok": True,
         "space": space,
         "gate": args.gate,
-        "rule": "缺陷须 ASSOCIATED→【测试】；再 ASSOCIATED→需求。未点选禁止 create。",
+        "rule": "缺陷须 ASSOCIATED→【测试】；需求写入描述追溯（不做 ASSOCIATED）。未点选【测试】禁止 create。",
         "askQuestionPreferred": True,
     }
 
@@ -257,7 +257,7 @@ def main() -> None:
             "suggestedLetter": "a" if options else None,
             "askQuestion": {
                 "id": "req",
-                "prompt": f"挂载点选 · 产品需求（将 ASSOCIATED 到缺陷；父测试={test_meta.get('serialNumber')}）",
+                "prompt": f"追溯需求 · 写入描述非 ASSOCIATED（父测试={test_meta.get('serialNumber')}）",
                 "options": options,
             },
             "letters": letter_map,

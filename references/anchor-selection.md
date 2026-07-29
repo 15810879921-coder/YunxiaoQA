@@ -1,20 +1,21 @@
-# 发起缺陷 · 挂载点选（【测试】+ 需求）
+# 发起缺陷 · 挂载点选（【测试】+ 需求追溯）
 
-缺陷发布前必须点选挂载锚点，**禁止** Agent 静默猜【测试】编号或需求编号。
+缺陷发布前必须点选【测试】锚点，**禁止** Agent 静默猜【测试】编号。
 
-## 强制规则
+## 规则
 
-1. 缺陷 **ASSOCIATED→** 所选【测试】（关联项；非 TASK_SUB 子项）
-2. 缺陷 **ASSOCIATED→** 所选产品需求（可从测试追溯预填，仍须点选确认）
-3. 未点选（或压缩串未解析回显）→ **禁止** `create_bug.py` 实写
+1. 缺陷 **ASSOCIATED→** 所选【测试】（关联项；非 TASK_SUB 子项）——硬门禁
+2. 产品需求：点选/追溯后 **写入缺陷描述「追溯需求」**；**不做** ASSOCIATED API（本期）
+3. 未点选【测试】（或压缩串未解析回显）→ **禁止** `create_bug.py` 实写
 
 ## 何时触发
 
 | 场景 | 是否点选 |
 |---|---|
-| `发起缺陷` / 绑测试的非本期 | **必须**点选【测试】；再点选需求 |
+| `发起缺陷` / 绑测试的非本期 | **必须**点选【测试】；需求可点选写入描述追溯 |
 | 口令已写 `测试任务=ONEOS-xx` 且列表唯一命中 | Plan/`AskQuestion` **预勾 ★**，仍须用户确认 |
-| 口令已写 `需求=` 且唯一命中 | 需求题预勾 ★，仍须确认 |
+| 口令已写 `需求=` 且唯一命中 | 需求题预勾 ★，确认后写入描述 |
+| 需求 0 候选 | 不阻断建单；描述无追溯段；可口令后补 `需求=` |
 | `发起缺陷(非本期)` 且 Plan 明示「无测试锚点」`allow-no-test` | 可跳过本门禁 |
 
 ## 执行顺序
@@ -24,10 +25,9 @@ list_bug_anchors.py --gate test
   → AskQuestion「挂载点选 · 【测试】」（或文字字母表）
   → 用户点选 / 压缩串
   → 人话回显一行（编号|标题）
-list_bug_anchors.py --gate req --test-task <已选编号>
-  → AskQuestion「挂载点选 · 产品需求」
-  → 用户点选 / 确认预勾
-  → 人话回显
+list_bug_anchors.py --gate req --test-task <已选编号>（可选）
+  → AskQuestion「追溯需求 · 写入描述（非 ASSOCIATED）」
+  → 用户点选 / 确认预勾 / 跳过
 Plan 汇总 → 用户「确认/执行」→ create_bug.py --test-task … [--req …]
 ```
 
@@ -40,7 +40,7 @@ python3 scripts/list_bug_anchors.py --gate test
 # 口令预填
 python3 scripts/list_bug_anchors.py --gate test --match DEMO-90
 
-# 已选测试后拉需求候选
+# 已选测试后拉需求候选（描述追溯用）
 python3 scripts/list_bug_anchors.py --gate req --test-task DEMO-90
 ```
 
@@ -55,10 +55,10 @@ stdout 含：
 | 题 `id` | prompt | 选项 |
 |---|---|---|
 | `test_task` | 挂载点选 · 【测试】任务（缺陷将 ASSOCIATED 关联此项） | `a`/`b`/… 来自脚本当轮列表 |
-| `req` | 挂载点选 · 产品需求（将 ASSOCIATED 到缺陷） | `a`/`b`/…；`auto_trace` 命中标 ★ 置顶 |
+| `req` | 追溯需求 · 写入描述（非 ASSOCIATED） | `a`/`b`/…；`auto_trace` 命中标 ★ 置顶 |
 
 - `title` 建议：`YunxiaoQA · 缺陷挂载点选`
-- 可两题同卡（先跑 `--gate both --test-task` 不适用；应先选测试再拉需求，故通常 **两卡串行**）
+- 通常 **两卡串行**（先测试再需求）
 - 渠道优先级与 YunxiaoPM 一致：**AskQuestion > 压缩串 > 明文**
 
 ## 文字字母表（后备）
@@ -73,7 +73,7 @@ b. …
 
 ## 禁止
 
-- 未点选就 `create_bug.py` 去掉 `--dry-run`
+- 未点选【测试】就 `create_bug.py` 去掉 `--dry-run`
 - 列表为空时瞎选已完成单或按标题模糊猜编号
-- 需求 0 候选时静默跳过 ASSOCIATED（应停并要求补关联或口令 `需求=`）
+- 事后 `relation/record` 挂需求并写「告警/未能挂上」类描述备注
 - 把缓存/上轮字母表当当轮真相（必须以脚本当轮 stdout 为准）
