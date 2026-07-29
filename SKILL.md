@@ -55,9 +55,19 @@ description: >-
 | PJ 云效项目点选 | YunxiaoPM `references/project-selection.md` + `scripts/list_projects.py` |
 | 缺陷描述模板 / 定位矩阵 | 本 Skill [references/bug-template.md](references/bug-template.md) · [references/diagnosis.md](references/diagnosis.md) |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
-| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `refresh_cookies.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` |
+| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `refresh_cookies.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `close_test_task.py` |
 
 日常测试**优先本 Skill**；不必再挂载英文 `yunxiao-bug-triage`（诊断要点已收入本 Skill）。
+
+## 写操作铁律（防编号误判 · 强制）
+
+历史事故：浏览器点状态菜单把 **ONEOS-343** 错关成 **ONEOS-309**。故：
+
+1. **禁止**用 `cursor-ide-browser` / DOM 点击 /「可交互节点」改云效状态、负责人、关联、迭代。
+2. **唯一写路径**：本 Skill `scripts/*.py`（Cookie/`refresh_cookies` / 页内 `fetch` 仅用于鉴权，不用于点列表）。
+3. **编号硬门禁**：口令 `ONEOS-xx` → 脚本 `--sn` → `serialNumber ==` 精确匹配 → apply → **回读** `serialNumber|subject|from→to`；任一不对立刻停。
+4. **闭环【测试】**：只用 `python3 scripts/close_test_task.py --sn ONEOS-xx`（先 `--dry-run`）；禁止手点「已完成」。
+5. Cookie/鉴权挂了：只许 `refresh_cookies.py` / `check_auth.py`，**禁止**改走浏览器点选「凑合关单」。
 
 ## 路由（按需完整阅读）
 
@@ -111,5 +121,6 @@ description: >-
 - [ ] 再次打开：仅自「已修复」且有复现说明；负责人未误改
 - [ ] 批量关闭：仅「已修复」→「已关闭」；复现单已跳过或已再次打开
 - [ ] 并入迭代：仅「已关闭」；迭代已存在（未新建）
-- [ ] 闭环【测试】：关联缺陷全部 ∈ {暂不修复, 已关闭}
-- [ ] 本轮无建【开发】、无创建迭代、无代开发改状态
+- [ ] 闭环【测试】：`close_test_task.py`；关联缺陷全部 ∈ {暂不修复, 已关闭}
+- [ ] 每次写操作回报含一行：`serialNumber | subject | from→to`（与口令编号一致）
+- [ ] 本轮无浏览器改状态；无建【开发】、无创建迭代、无代开发改状态

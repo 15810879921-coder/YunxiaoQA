@@ -107,3 +107,20 @@ PATCH /projex/api/workitem/workitem/{id}?_input_charset=utf-8
 ## 校验
 
 每次 apply 后回读：标题、状态、负责人、验证者、关联、sprint；与 Plan 不一致则停。
+
+**编号硬门禁（强制）**：回读 `serialNumber` 必须等于口令/Plan 编号；回报一行：
+
+```text
+ONEOS-xx | 【测试】标题… | 处理中→已完成
+```
+
+对不上立刻停。**禁止**用浏览器点列表改状态（历史误关 ONEOS-309 当 343）。
+
+### 闭环【测试】脚本
+
+```bash
+python3 scripts/close_test_task.py --sn ONEOS-xx --dry-run
+python3 scripts/close_test_task.py --sn ONEOS-xx
+```
+
+退出码：`0` 成功；`2` 鉴权；`3` 编号/状态回读失败；`4` 关联缺陷未闭环。

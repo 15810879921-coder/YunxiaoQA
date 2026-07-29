@@ -8,7 +8,8 @@
 | `list_test_tasks.py` | 拉【测试】待处理/处理中 |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
 | `create_bug.py` | **发起缺陷**（本期强制 create 时 ASSOCIATED + 回读校验） |
-| `transit_bug.py` | 测试侧流转：已修复→已关闭 / 再次打开 |
+| `transit_bug.py` | 测试侧流转：已修复→已关闭 / 再次打开（含编号回读） |
+| `close_test_task.py` | **闭环【测试】**：待处理\|处理中→已完成（`--sn` 精确匹配 + 回读） |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |
 
 ## 鉴权
@@ -44,9 +45,14 @@ python3 scripts/create_bug.py --mode 非本期 --title '…' \
   --assignee 沈辰 --verifier 王冕 --allow-no-associate --dry-run
 
 python3 scripts/transit_bug.py --sn DEMO-91 --from 已修复 --to 已关闭 --dry-run
+
+# 闭环【测试】（先 dry-run；禁止浏览器点状态）
+python3 scripts/close_test_task.py --sn ONEOS-343 --dry-run
+python3 scripts/close_test_task.py --sn ONEOS-343
 ```
 
-`create_bug.py` / `transit_bug.py` 为写操作：须先走 YunxiaoQA **Plan 门禁**，用户确认后再去掉 `--dry-run` 执行。
+`create_bug.py` / `transit_bug.py` / `close_test_task.py` 为写操作：须先走 YunxiaoQA **Plan 门禁**，用户确认后再去掉 `--dry-run` 执行。  
+**禁止**用浏览器 DOM 点击改云效状态。
 
 ### `create_bug.py` 退出码
 
@@ -55,3 +61,12 @@ python3 scripts/transit_bug.py --sn DEMO-91 --from 已修复 --to 已关闭 --dr
 | 0 | 成功（含关联校验通过） |
 | 2 | 鉴权失败 |
 | 3 | 已建单但 ASSOCIATED 回读失败（须重试/UI 确认，勿事后补关联） |
+
+### `close_test_task.py` / `transit_bug.py` 退出码
+
+| code | 含义 |
+|---|---|
+| 0 | 成功（回读编号+状态通过） |
+| 2 | 鉴权失败（`close_test_task`） |
+| 3 | 编号或状态回读失败 |
+| 4 | 关联缺陷未全部闭环（`close_test_task`） |

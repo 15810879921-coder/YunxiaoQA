@@ -17,6 +17,7 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from _auth import (  # noqa: E402
     brief_item,
+    get_workitem,
     post_list,
     session,
     space_id,
@@ -85,12 +86,64 @@ def main() -> None:
         "toId": to_id,
         "dryRun": args.dry_run,
     }
+    report = f"{meta.get('serialNumber') or args.sn or wid} | {meta.get('subject') or ''} | {args.from_name}→{args.to_name}"
+    plan["report"] = report
+
     if args.dry_run:
         print(json.dumps({"ok": True, "wouldTransit": plan}, ensure_ascii=False, indent=2))
         return
 
     result = transit(s, wid, from_id, to_id)
-    print(json.dumps({"ok": True, "plan": plan, "result": result}, ensure_ascii=False, indent=2))
+    after = brief_item(get_workitem(s, wid))
+    after_sn = after.get("serialNumber")
+    after_st = after.get("status")
+    expect_sn = meta.get("serialNumber") or args.sn
+    line = f"{after_sn} | {after.get('subject') or ''} | {args.from_name}→{after_st}"
+
+    if expect_sn and after_sn != expect_sn:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "serial_mismatch",
+                    "expected": expect_sn,
+                    "actual": after_sn,
+                    "report": line,
+                    "plan": plan,
+                    "after": after,
+                    "hint": "编号回读失败：立刻停；禁止用浏览器补救",
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise SystemExit(3)
+
+    if after_st != args.to_name:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "status_mismatch",
+                    "expectedStatus": args.to_name,
+                    "actualStatus": after_st,
+                    "report": line,
+                    "plan": plan,
+                    "after": after,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise SystemExit(3)
+
+    print(
+        json.dumps(
+            {"ok": True, "plan": plan, "report": line, "result": result, "after": after},
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
 
 
 if __name__ == "__main__":

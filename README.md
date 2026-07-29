@@ -100,7 +100,7 @@ python3 scripts/refresh_cookies.py --probe
 | 发起缺陷（本期 create 挂 ASSOCIATED + 校验） | ✅ `create_bug.py` |
 | 发起缺陷（非本期） | ✅ |
 | 已修复→已关闭 / 再次打开 | ✅ `transit_bug.py` |
-| 闭环【测试】 | ✅（关联缺陷均已关闭/暂不修复） |
+| 闭环【测试】 | ✅ `close_test_task.py`（`--sn` + 回读；禁止浏览器点状态） |
 | 用例库精确执行 | ❌ 需另装 `$yunxiao-test-management` |
 
 ## 目录结构
@@ -119,7 +119,8 @@ python3 scripts/refresh_cookies.py --probe
     ├── list_test_tasks.py
     ├── list_bugs.py
     ├── create_bug.py
-    └── transit_bug.py
+    ├── transit_bug.py
+    └── close_test_task.py
 ```
 
 ## 安全说明
@@ -127,6 +128,7 @@ python3 scripts/refresh_cookies.py --probe
 - 仓库**不含**账号密码、Cookie、`/tmp/yunxiao_cookies.json`
 - 登录态只保存在本机；失效时用 `refresh_cookies.py`
 - 写操作须 Plan 确认；测试侧禁止把缺陷改成「已修复 / 暂不修复」（开发侧职责）
+- **禁止**用浏览器 DOM / 可交互节点改云效状态（防编号串单）
 
 ## 与产品 / 开发 Skill 的关系
 
