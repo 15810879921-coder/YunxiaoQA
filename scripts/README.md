@@ -5,6 +5,7 @@
 | `_auth.py` | 共享 Cookie / 会话 / list / transit / create / 关联校验 / AuthError |
 | `check_auth.py` | 探测会话是否可用；失败打印刷新说明 |
 | `refresh_cookies.py` | 从本机 Chrome 导出 Cookie → `/tmp/yunxiao_cookies.json` |
+| `list_bug_anchors.py` | **挂载点选**：【测试】/需求字母表 + AskQuestion 载荷 |
 | `list_test_tasks.py` | 拉【测试】待处理/处理中 |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
 | `create_bug.py` | **发起缺陷**（强制：【测试】TASK_SUB 子项 + ASSOCIATED→需求） |
@@ -33,6 +34,9 @@ cd ~/.cursor/skills/YunxiaoQA
 python3 scripts/check_auth.py
 python3 scripts/list_test_tasks.py
 python3 scripts/list_bugs.py --status 已修复 --status 暂不修复
+
+python3 scripts/list_bug_anchors.py --gate test
+python3 scripts/list_bug_anchors.py --gate req --test-task DEMO-90
 
 # 发起缺陷（先 --dry-run，Plan 确认后再实写）
 python3 scripts/create_bug.py --mode 本期 --title '[模块] 问题简述' \

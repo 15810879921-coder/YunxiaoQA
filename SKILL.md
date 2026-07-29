@@ -55,8 +55,9 @@ description: >-
 | 人员 / 项目 catalog / 通用状态 | 优先读本目录 [assets/runtime-ids.json](assets/runtime-ids.json)；缺项再读 `~/.cursor/skills/YunxiaoPM/assets/runtime-ids.json` |
 | PJ 云效项目点选 | YunxiaoPM `references/project-selection.md` + `scripts/list_projects.py` |
 | 缺陷描述模板 / 定位矩阵 | 本 Skill [references/bug-template.md](references/bug-template.md) · [references/diagnosis.md](references/diagnosis.md) |
+| 挂载点选【测试】/需求 | [references/anchor-selection.md](references/anchor-selection.md) · `scripts/list_bug_anchors.py` |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
-| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `refresh_cookies.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `close_test_task.py` |
+| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `close_test_task.py` |
 
 日常测试**优先本 Skill**；不必再挂载英文 `yunxiao-bug-triage`（诊断要点已收入本 Skill）。
 
@@ -79,6 +80,7 @@ description: >-
 | 诊断 · 查重 · 分层初判 | [references/diagnosis.md](references/diagnosis.md) |
 | 缺陷描述模板 | [references/bug-template.md](references/bug-template.md) |
 | Plan 确认清单 | [references/plan-gate.md](references/plan-gate.md) |
+| 挂载点选 | [references/anchor-selection.md](references/anchor-selection.md) |
 | 实写 API | [references/live-api.md](references/live-api.md) |
 
 ## 口令速查
@@ -106,9 +108,10 @@ description: >-
 3. **分层初判**（前端/后端/数据/配置/环境；标「推断」）
 4. **填模板** → 见 [bug-template.md](references/bug-template.md)
 5. **字段**：验证者=当前测试人；本期负责人=同交付【开发】负责人（多人 Plan 点选）；非本期负责人=口令必填
+5b. **挂载点选（强制）**：口令未给出唯一 `测试任务=` / `需求=` 时，先跑 `list_bug_anchors.py`，用 **AskQuestion**（或字母表）点选【测试】再点选需求；未点选禁止 create。详见 [anchor-selection.md](references/anchor-selection.md)。
 6. **关联（强制）**：
    - 缺陷 **create 时**挂 `TASK_SUB→【测试】`（`parent` + `createWorkitemRelationInfo`），作为测试任务**子项**；回读 PARENT_SUB 校验。
-   - 从【测试】追溯产品需求（测试自身 / 父【交付】 / 兄弟【开发】的 ASSOCIATED），再 `ASSOCIATED→需求` 挂到缺陷；口令 `需求=` / `--req` 可覆盖。
+   - 从【测试】追溯产品需求（测试自身 / 父【交付】 / 兄弟【开发】的 ASSOCIATED），再 `ASSOCIATED→需求` 挂到缺陷；口令 `需求=` / `--req` 可覆盖；**点选确认后的编号**才写入脚本。
    - **禁止**只用 ASSOCIATED 挂测试、不建子项；**禁止**依赖事后补「测试关联」当子项。
 7. Plan 回显 → 确认 → apply（`create_bug.py`）→ 回读子项+需求 → 回报；校验失败（退出码 3）须停
 
