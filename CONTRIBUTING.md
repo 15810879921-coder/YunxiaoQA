@@ -23,10 +23,15 @@ gh api -X PUT repos/15810879921-coder/YunxiaoQA/collaborators/<你的GitHub用�
 # 1）克隆可写仓库（或已有则 pull）
 git clone https://github.com/15810879921-coder/YunxiaoQA.git
 cd YunxiaoQA
-git checkout main && git pull
+git checkout main
+git pull --rebase origin main
 
 # 2）改完自测（至少）
-python3 scripts/check_auth.py
+# Windows PowerShell
+.\scripts\run-skill-script.ps1 check_auth.py
+
+# macOS / Linux
+./scripts/run-skill-script.sh check_auth.py
 # 涉及写操作：先 --dry-run，再 Plan 确认后的真实脚本
 
 # 3）提交并推送
@@ -41,17 +46,13 @@ git push origin main
 
 ```bash
 npx skills update YunxiaoQA
-# Codex 若仍读不到，再链一次：
-mkdir -p ~/.codex/skills && ln -sfn ~/.agents/skills/yunxiaoqa ~/.codex/skills/yunxiaoqa
 ```
 
-开发中想**边改边用**，可把全局安装目录换成你的 clone（或软链）：
+开发中想**边改边用**，让安装器从当前 clone 分别安装到两个客户端；不要手工操作客户端技能目录：
 
 ```bash
-# 示例：Cursor 全局技能目录指向你的 clone（路径按本机调整）
-ln -sfn "$(pwd)" ~/.agents/skills/yunxiaoqa
-ln -sfn "$(pwd)" ~/.cursor/skills/YunxiaoQA
-mkdir -p ~/.codex/skills && ln -sfn "$(pwd)" ~/.codex/skills/yunxiaoqa
+npx skills add . -a cursor -g -y
+npx skills add . -a codex -g -y
 ```
 
 ## 3. 建议改什么 / 别乱动什么
