@@ -59,6 +59,19 @@ npx skills update YunxiaoQA
 
 仓库：https://github.com/15810879921-coder/YunxiaoQA
 
+## 测试同学：改技能并推回仓库
+
+本仓库对协作者开放 **Write**，测试可根据使用踩坑直接优化并 `git push`。  
+完整流程见 **[CONTRIBUTING.md](CONTRIBUTING.md)**（拿权限 → clone → 改 → 推 → `npx skills update`）。
+
+管理员邀请示例：
+
+```bash
+gh api -X PUT repos/15810879921-coder/YunxiaoQA/collaborators/<GitHub用户名> -f permission=push
+```
+
+被邀请人须在 GitHub **接受邀请** 后才能推送。不要只改 `npx skills` 安装目录——请改本仓库 clone，再让同事 `npx skills update YunxiaoQA`。
+
 ## 装完后怎么用
 
 对新开的 Agent 说：
