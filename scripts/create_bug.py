@@ -1,4 +1,4 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """发起缺陷（本期 / 非本期）。
 
 写操作：须先经 YunxiaoQA Plan 门禁确认后再执行（去掉 --dry-run）。
@@ -8,10 +8,15 @@
 2. 产品需求：点选/追溯后**写入描述作追溯记录**；本期不做 Cookie 事后 ASSOCIATED
    （第二挂常报「不能关联相同的工作项」；勿告警、勿伪造成功备注）。
 3. 口令 --req 可覆盖自动追溯；点选确认后的编号才写入。
+4. 独立建单和测试用例来源建单统一把验证者设置为当前登录用户；不接受验证者覆盖。
 
 示例：
-  python3 scripts/create_bug.py --mode 本期 --title '[验证] …' \\
-    --test-task DEMO-90 --assignee 沈辰 --verifier 王冕 --dry-run
+  skill-run create_bug.py --mode 本期 --title '[验证] …' \\
+    --test-task DEMO-90 --assignee 沈辰 --dry-run
+
+  skill-run create_bug.py --mode 本期 --source test-case \\
+    --test-case CASE-1001 --title '[验证] …' --test-task DEMO-90 \\
+    --assignee 沈辰 --dry-run
 """
 from __future__ import annotations
 
@@ -28,11 +33,13 @@ from _auth import (  # noqa: E402
     create_workitem,
     find_by_serial,
     get_workitem,
+    get_workitem_extra,
     list_associated,
     resolve_person,
     resolve_req_from_test,
     session,
     set_document,
+    set_workitem_property,
     space_id,
 )
 
@@ -89,6 +96,98 @@ def append_req_trace(html: str, req_meta: dict) -> str:
     return html + f"<h2>追溯需求</h2><p>{sn} {subj}</p>"
 
 
+def append_test_case_trace(html: str, test_case: str) -> str:
+    """记录测试用例来源；不伪造未验证的正式工作项关系。"""
+    return html + f"<h2>测试用例来源</h2><p>{test_case}</p>"
+
+
+def _user_meta(value: object) -> tuple[str, str] | None:
+    if isinstance(value, str) and value.strip():
+        return value.strip(), value.strip()
+    if not isinstance(value, dict):
+        return None
+    identifier = (
+        value.get("identifier")
+        or value.get("userIdentifier")
+        or value.get("userId")
+        or value.get("id")
+    )
+    if not identifier:
+        return None
+    name = (
+        value.get("displayName")
+        or value.get("realName")
+        or value.get("name")
+        or str(identifier)
+    )
+    return str(identifier), str(name)
+
+
+def current_actor_from_created(*items: object) -> tuple[str, str] | None:
+    """从刚创建工作项的服务端记录取得当前会话用户。"""
+    actor_keys = (
+        "creator",
+        "createdBy",
+        "creatorUser",
+        "createdByUser",
+        "createUser",
+    )
+    id_keys = (
+        "creatorIdentifier",
+        "createdByIdentifier",
+        "creatorId",
+        "createdById",
+    )
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        for key in actor_keys:
+            hit = _user_meta(item.get(key))
+            if hit:
+                return hit
+        for key in id_keys:
+            value = item.get(key)
+            if isinstance(value, str) and value.strip():
+                return value.strip(), value.strip()
+    return None
+
+
+def field_user_id(data: object, field_identifier: str) -> str | None:
+    """兼容 extra 的对象、字段列表和 user/list 字段形态。"""
+    if isinstance(data, list):
+        for item in data:
+            hit = field_user_id(item, field_identifier)
+            if hit:
+                return hit
+        return None
+    if not isinstance(data, dict):
+        return None
+    if field_identifier in data:
+        hit = _user_meta(data[field_identifier])
+        if hit:
+            return hit[0]
+        value = data[field_identifier]
+        if isinstance(value, list) and value:
+            hit = _user_meta(value[0])
+            if hit:
+                return hit[0]
+    field_key = data.get("fieldIdentifier") or data.get("propertyKey")
+    if field_key == field_identifier:
+        for key in ("value", "fieldValue", "propertyValue", "users"):
+            value = data.get(key)
+            if isinstance(value, list) and value:
+                value = value[0]
+            hit = _user_meta(value)
+            if hit:
+                return hit[0]
+    for value in data.values():
+        if isinstance(value, (dict, list)):
+            hit = field_user_id(value, field_identifier)
+            if hit:
+                return hit
+    return None
+
+
 def main() -> None:
     ap = argparse.ArgumentParser(
         description="发起缺陷（ASSOCIATED→【测试】；需求写入描述追溯）"
@@ -96,7 +195,13 @@ def main() -> None:
     ap.add_argument("--mode", choices=["本期", "非本期"], required=True)
     ap.add_argument("--title", required=True)
     ap.add_argument("--assignee", required=True, help="负责人：姓名或 user id")
-    ap.add_argument("--verifier", default="王冕", help="验证者：姓名或 user id")
+    ap.add_argument(
+        "--source",
+        choices=["standalone", "test-case"],
+        default="standalone",
+        help="建单来源：独立创建或测试用例创建",
+    )
+    ap.add_argument("--test-case", default=None, help="测试用例编号/执行记录（source=test-case 必填）")
     ap.add_argument("--priority", default="中", choices=list(PRI.keys()))
     ap.add_argument("--severity", default="3-一般", choices=list(SEV.keys()))
     ap.add_argument("--test-task", default=None, help="如 DEMO-90 / ONEOS-xx（本期必填）")
@@ -122,6 +227,10 @@ def main() -> None:
 
     if args.mode == "本期" and args.allow_no_test:
         raise SystemExit("本期禁止 --allow-no-test；必须 ASSOCIATED→【测试】")
+    if args.test_case:
+        args.source = "test-case"
+    if args.source == "test-case" and not args.test_case:
+        raise SystemExit("测试用例创建路径必须提供 --test-case")
 
     html = args.description_html
     if args.description_file:
@@ -131,7 +240,6 @@ def main() -> None:
 
     try:
         assignee_id, assignee_name = resolve_person(args.assignee)
-        verifier_id, verifier_name = resolve_person(args.verifier)
     except ValueError as e:
         raise SystemExit(str(e)) from e
 
@@ -175,6 +283,8 @@ def main() -> None:
 
     if req_meta:
         html = append_req_trace(html, req_meta)
+    if args.test_case:
+        html = append_test_case_trace(html, args.test_case)
 
     payload: dict = {
         "subject": args.title,
@@ -193,7 +303,6 @@ def main() -> None:
             {"fieldIdentifier": "priority", "value": PRI[args.priority]},
             {"fieldIdentifier": "seriousLevel", "value": SEV[args.severity]},
             {"fieldIdentifier": "assignedTo", "value": assignee_id},
-            {"fieldIdentifier": "workitem.verifier", "value": verifier_id},
         ],
         "attachmentIdList": [],
         "cloneFrom": None,
@@ -210,8 +319,14 @@ def main() -> None:
         "mode": args.mode,
         "space": space,
         "title": args.title,
+        "source": args.source,
+        "testCase": args.test_case,
         "assignee": {"id": assignee_id, "name": assignee_name},
-        "verifier": {"id": verifier_id, "name": verifier_name},
+        "verifier": {
+            "policy": "current authenticated user",
+            "overrideAllowed": False,
+            "resolvedAt": "apply from server-recorded creation actor",
+        },
         "priority": args.priority,
         "severity": args.severity,
         "testAssociated": test_meta,
@@ -227,6 +342,30 @@ def main() -> None:
     created = create_workitem(s, payload)
     bug_id = created["identifier"]
     set_document(s, bug_id, html)
+    live_raw = get_workitem(s, bug_id)
+    extra_before = get_workitem_extra(s, bug_id)
+    current_actor = current_actor_from_created(created, live_raw)
+    if not current_actor:
+        out = {
+            "ok": False,
+            "bug": brief_item(live_raw),
+            "error": "已建单，但无法从云效建单结果解析当前会话用户，未写验证者",
+            "verifierPolicy": "当前登录用户；禁止猜测或口令覆盖",
+        }
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+        raise SystemExit(4)
+    verifier_id, verifier_name = current_actor
+    verifier_before = field_user_id(extra_before, "workitem.verifier")
+    if verifier_before != verifier_id:
+        set_workitem_property(
+            s,
+            bug_id,
+            property_key="workitem.verifier",
+            property_value=verifier_id,
+        )
+    extra_after = get_workitem_extra(s, bug_id)
+    verifier_after = field_user_id(extra_after, "workitem.verifier")
+    verifier_ok = verifier_after == verifier_id
 
     test_ok = True
     test_error = None
@@ -245,11 +384,19 @@ def main() -> None:
         + list_associated(s, bug_id, forward=False)
     ]
 
-    ok = test_ok if test_meta else True
+    ok = verifier_ok and (test_ok if test_meta else True)
     out = {
         "ok": ok,
         "bug": live,
         "plan": plan,
+        "verifier": {
+            "source": "current authenticated user recorded by Yunxiao",
+            "id": verifier_id,
+            "name": verifier_name,
+            "before": verifier_before,
+            "readBack": verifier_after,
+            "ok": verifier_ok,
+        },
         "testAssociatedOk": test_ok if test_meta else None,
         "testAssociatedError": test_error,
         "reqTrace": req_meta,
@@ -257,6 +404,8 @@ def main() -> None:
         "note": "硬门禁：ASSOCIATED→【测试】；需求写入描述追溯，不做 ASSOCIATED API",
     }
     print(json.dumps(out, ensure_ascii=False, indent=2))
+    if not verifier_ok:
+        raise SystemExit(4)
     if not ok:
         raise SystemExit(3)
 

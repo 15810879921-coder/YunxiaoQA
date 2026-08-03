@@ -3,13 +3,12 @@
   "skill": "YunxiaoQA",
   "verified_at": "2026-07-27",
   "verified_on": "01_ONEOS + DEMO(敏捷研发示例项目)",
-  "note": "测试任务常量。项目 space 须 Plan/口令点选后写入 last_selected；人员优先本文件 people，可回退 YunxiaoPM。禁止把 Cookie 写入本仓库。",
-  "upstream_runtime_ids": "~/.cursor/skills/YunxiaoPM/assets/runtime-ids.json",
+  "note": "测试任务常量。项目 space 须 Plan/口令点选后写入 last_selected；人员只读本文件 people，缺项按交接编号实时查询云效。禁止把 Cookie 写入本仓库。",
   "people": {
     "wangmian": {
       "displayName": "王冕",
       "identifier": "6811df000601d2fea60144a9",
-      "role": "产品/默认验证者（可按口令改）"
+      "role": "产品人员示例（不得作为默认验证者；验证者取当前登录用户）"
     },
     "hefei": {
       "displayName": "何斐",
@@ -139,12 +138,15 @@
   "assignee_rules": {
     "本期缺陷": "同交付下【开发】任务负责人；多人 Plan 点选",
     "非本期缺陷": "口令指定",
-    "验证者": "当前测试人"
+    "验证者": "当前登录测试用户（独立/测试用例建单均强制，不可覆盖）"
   },
   "tester_allowed_transitions": [
     "已修复→已关闭",
     "已修复→再次打开",
-    "【测试】→已完成"
+    "【测试】待处理→处理中",
+    "【测试】处理中→已完成",
+    "需求待测试→测试中",
+    "需求测试中→测试完成"
   ],
   "tester_forbidden": [
     "创建【开发】",

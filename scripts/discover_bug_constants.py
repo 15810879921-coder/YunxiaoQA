@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """实网探测：Bug 类型 / 缺陷状态 / 验证者字段 / 任务「处理中」。stdout=JSON。"""
 from __future__ import annotations
 
 import json
+import tempfile
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -14,8 +15,8 @@ try:
 except ImportError:
     browser_cookie3 = None
 
-PM_RUNTIME = Path.home() / ".cursor/skills/YunxiaoPM/assets/runtime-ids.json"
-RUNTIME = json.loads(PM_RUNTIME.read_text())
+ROOT = Path(__file__).resolve().parents[1]
+RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text())
 ORG = RUNTIME["project"]["organizationIdentifier"]
 SPACE = (RUNTIME.get("project", {}).get("last_selected") or {}).get(
     "spaceIdentifier"
@@ -32,7 +33,7 @@ def load_jar() -> dict[str, str]:
             except Exception:
                 pass
     if not jar.get("XSRF-TOKEN"):
-        p = Path("/tmp/yunxiao_cookies.json")
+        p = Path(tempfile.gettempdir()) / "yunxiao_cookies.json"
         if p.exists():
             raw = json.loads(p.read_text())
             jar = (

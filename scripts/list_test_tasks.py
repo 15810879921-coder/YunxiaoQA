@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """拉取【测试】任务（默认待处理+处理中）。stdout=JSON。
 
 示例：
-  python3 scripts/list_test_tasks.py
-  python3 scripts/list_test_tasks.py --status 处理中
-  python3 scripts/list_test_tasks.py --space 1280be963a5a2cc126a4118dca
+  skill-run list_test_tasks.py
+  skill-run list_test_tasks.py --status 处理中
+  skill-run list_test_tasks.py --space 1280be963a5a2cc126a4118dca
 """
 from __future__ import annotations
 

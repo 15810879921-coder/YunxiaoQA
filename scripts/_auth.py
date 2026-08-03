@@ -1,8 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """YunxiaoQA 共享鉴权与 HTTP 会话。"""
 from __future__ import annotations
 
 import json
+import tempfile
 import urllib.parse
 from pathlib import Path
 from typing import Any
@@ -14,18 +15,17 @@ RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text())
 SPACE = (
     (RUNTIME.get("project") or {}).get("last_selected") or {}
 ).get("spaceIdentifier") or "1280be963a5a2cc126a4118dca"
-COOKIE_FALLBACK = Path("/tmp/yunxiao_cookies.json")
-PM_RUNTIME = Path.home() / ".cursor/skills/YunxiaoPM/assets/runtime-ids.json"
+COOKIE_FALLBACK = Path(tempfile.gettempdir()) / "yunxiao_cookies.json"
 
 AUTH_HELP = """云效会话失效或缺失。请任选一种方式刷新后重试：
 
 1) 推荐：Chrome 已登录 devops.aliyun.com 后执行
-   python3 scripts/refresh_cookies.py
+   skill-run refresh_cookies.py
 
-2) 手工：将 Cookie 写入 /tmp/yunxiao_cookies.json，至少含：
+2) 手工：将 Cookie 写入当前系统临时目录的 yunxiao_cookies.json，至少含：
    {"XSRF-TOKEN":"...","AONE_SESSION":"..."}
 
-3) 探测：python3 scripts/check_auth.py
+3) 探测：skill-run check_auth.py
 
 注意：不要把 Cookie 写入 Skill 仓库或缺陷描述。"""
 
@@ -35,13 +35,8 @@ class AuthError(RuntimeError):
 
 
 def load_people() -> dict[str, Any]:
-    """优先本 Skill assets/people，再回退 YunxiaoPM。"""
+    """只读取本 Skill 自带的人员目录，禁止跨 Skill 路径回退。"""
     merged: dict[str, Any] = {}
-    if PM_RUNTIME.exists():
-        try:
-            merged.update(json.loads(PM_RUNTIME.read_text()).get("people") or {})
-        except Exception:
-            pass
     local = RUNTIME.get("people") or {}
     if isinstance(local, dict):
         merged.update(local)
@@ -106,13 +101,13 @@ def load_jar() -> dict[str, str]:
 
 
 def dump_chrome_cookies(path: Path | None = None) -> dict[str, str]:
-    """从 Chrome 导出云效相关 Cookie 到 path（默认 /tmp/yunxiao_cookies.json）。"""
+    """从 Chrome 导出云效相关 Cookie 到 path（默认使用当前系统临时目录）。"""
     try:
         import browser_cookie3
     except ImportError as e:
         raise AuthError(
             "未安装 browser_cookie3，无法自动刷新。\n"
-            "pip3 install browser_cookie3\n\n" + AUTH_HELP
+            "请为当前 Skill 启动器选定的 Python 3 安装 browser_cookie3。\n\n" + AUTH_HELP
         ) from e
     jar: dict[str, str] = {}
     for domain in (".aliyun.com", "devops.aliyun.com", ".devops.aliyun.com"):
@@ -149,7 +144,7 @@ def dump_chrome_cookies(path: Path | None = None) -> dict[str, str]:
         keep["XSRF-TOKEN"] = jar["XSRF-TOKEN"]
     if "AONE_SESSION" not in keep and "AONE_SESSION" in jar:
         keep["AONE_SESSION"] = jar["AONE_SESSION"]
-    # 仍不够时写全量 jar（仍仅本机 /tmp）
+    # 仍不够时写全量 jar（仍仅写入本机系统临时目录）
     payload = keep if keep.get("XSRF-TOKEN") or keep.get("AONE_SESSION") else jar
     out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
     return payload
@@ -284,6 +279,52 @@ def get_workitem(s: requests.Session, workitem_id: str) -> dict[str, Any]:
     if not isinstance(result, dict):
         raise RuntimeError(data)
     return result
+
+
+def get_workitem_extra(s: requests.Session, workitem_id: str) -> Any:
+    """读取验证者等扩展字段。"""
+    r = s.get(
+        f"https://devops.aliyun.com/projex/api/workitem/workitem/{workitem_id}/extra",
+        timeout=45,
+    )
+    try:
+        data = r.json()
+    except Exception:
+        data = None
+    _raise_if_auth_failed(r, data)
+    r.raise_for_status()
+    if not isinstance(data, dict) or data.get("code") not in (200, None):
+        raise RuntimeError((data or {}).get("errorMsg") if isinstance(data, dict) else data)
+    return data.get("result")
+
+
+def set_workitem_property(
+    s: requests.Session,
+    workitem_id: str,
+    *,
+    property_key: str,
+    property_value: Any,
+    operate_type: str = "COVER",
+) -> None:
+    """更新单个工作项字段；调用方必须随后回读。"""
+    r = s.patch(
+        f"https://devops.aliyun.com/projex/api/workitem/workitem/{workitem_id}?_input_charset=utf-8",
+        json={
+            "workitemIdentifier": workitem_id,
+            "propertyKey": property_key,
+            "propertyValue": property_value,
+            "operateType": operate_type,
+        },
+        timeout=45,
+    )
+    try:
+        data = r.json()
+    except Exception:
+        data = None
+    _raise_if_auth_failed(r, data)
+    r.raise_for_status()
+    if isinstance(data, dict) and data.get("code") not in (200, None):
+        raise RuntimeError(data.get("errorMsg") or data)
 
 
 def list_relations(
@@ -452,6 +493,89 @@ def set_document(s: requests.Session, workitem_id: str, html: str) -> None:
         data = None
     _raise_if_auth_failed(r, data)
     # document patch 偶发非 200 体；不强制
+
+
+def set_document_checked(s: requests.Session, workitem_id: str, html: str) -> None:
+    """严格更新描述；用于证据等必须回读的受管区块。"""
+    r = s.patch(
+        f"https://devops.aliyun.com/projex/api/workitem/workitem/{workitem_id}/document?_input_charset=utf-8",
+        json={"content": html, "formatType": "RICHTEXT"},
+        timeout=45,
+    )
+    try:
+        data = r.json()
+    except Exception:
+        data = None
+    _raise_if_auth_failed(r, data)
+    r.raise_for_status()
+    if isinstance(data, dict) and data.get("code") not in (200, None):
+        raise RuntimeError(data.get("errorMsg") or data)
+
+
+def document_content(item: dict[str, Any]) -> str:
+    """兼容 get_workitem 的几种描述字段形态。"""
+    doc = item.get("document")
+    if isinstance(doc, dict):
+        return str(doc.get("content") or "")
+    if isinstance(doc, str):
+        return doc
+    for key in ("description", "content"):
+        value = item.get(key)
+        if isinstance(value, str):
+            return value
+    return ""
+
+
+def list_next_statuses(
+    s: requests.Session, workitem_id: str, current_status_id: str
+) -> list[dict[str, str]]:
+    """读取当前工作项允许的下一状态，不依赖本地硬编码 ID。"""
+    r = s.get(
+        f"https://devops.aliyun.com/projex/api/workitem/workitem/{workitem_id}/nextStatus/list",
+        params={
+            "currentStatusIdentifier": current_status_id,
+            "_input_charset": "utf-8",
+        },
+        timeout=45,
+    )
+    try:
+        data = r.json()
+    except Exception:
+        data = None
+    _raise_if_auth_failed(r, data)
+    r.raise_for_status()
+    if not isinstance(data, dict) or data.get("code") not in (200, None):
+        raise RuntimeError((data or {}).get("errorMsg") if isinstance(data, dict) else data)
+    raw = data.get("result") or []
+    if isinstance(raw, dict):
+        raw = raw.get("statuses") or raw.get("list") or raw.get("data") or []
+    result: list[dict[str, str]] = []
+    for item in raw if isinstance(raw, list) else []:
+        if not isinstance(item, dict):
+            continue
+        status = item.get("status") if isinstance(item.get("status"), dict) else item
+        identifier = status.get("identifier") or status.get("statusIdentifier")
+        name = status.get("displayName") or status.get("name") or status.get("statusName")
+        if identifier and name:
+            result.append({"identifier": str(identifier), "name": str(name)})
+    return result
+
+
+def resolve_next_status_id(
+    s: requests.Session,
+    workitem_id: str,
+    current_status_id: str,
+    target_name: str,
+) -> str:
+    choices = list_next_statuses(s, workitem_id, current_status_id)
+    matches = [x for x in choices if x["name"].strip() == target_name.strip()]
+    if len(matches) != 1:
+        names = [x["name"] for x in choices]
+        raise RuntimeError(
+            f"状态门禁失败：目标「{target_name}」唯一命中数={len(matches)}；"
+            f"当前可选={names}"
+        )
+    return matches[0]["identifier"]
 
 
 def transit(

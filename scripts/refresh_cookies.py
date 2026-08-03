@@ -1,11 +1,11 @@
-#!/usr/bin/env python3
-"""从本机 Chrome 刷新云效 Cookie 到 /tmp/yunxiao_cookies.json。
+#!/usr/bin/env python
+"""从本机 Chrome 刷新云效 Cookie 到当前系统临时目录。
 
 须先在 Chrome 登录 https://devops.aliyun.com 。
 
 示例：
-  python3 scripts/refresh_cookies.py
-  python3 scripts/refresh_cookies.py --probe
+  skill-run refresh_cookies.py
+  skill-run refresh_cookies.py --probe
 """
 from __future__ import annotations
 

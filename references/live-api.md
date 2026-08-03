@@ -2,7 +2,7 @@
 
 与 YunxiaoPM 共用 Projex 会话；**禁止**把凭证写入 Skill 或缺陷描述。
 
-通用约定见 `~/.cursor/skills/YunxiaoPM/references/live-api.md`。常量以本 Skill [assets/runtime-ids.json](../assets/runtime-ids.json) 为准（2026-07-27 在 `01_ONEOS` 实网验证）。
+本文件自包含测试侧 Projex 调用约定。常量只以本 Skill [assets/runtime-ids.json](../assets/runtime-ids.json) 为准（2026-07-27 在 `01_ONEOS` 实网验证）；缺项按交接编号实时查询云效，禁止读取其他 Skill 的安装目录。
 
 **鉴权提示：** 本机 Chrome `browser_cookie3` 可能 `invalid session`；已登录的 Cursor/浏览器页内 `fetch(..., {credentials:'include'})` 可用。优先复用有效会话。
 
@@ -10,8 +10,8 @@
 
 ```bash
 # Chrome 已登录 devops.aliyun.com
-python3 scripts/refresh_cookies.py --probe   # 写入 /tmp/yunxiao_cookies.json 并探测
-python3 scripts/check_auth.py                # 仅探测；失败会打印 AUTH_HELP
+skill-run refresh_cookies.py --probe   # 写入当前系统临时目录并探测
+skill-run check_auth.py                # 仅探测；失败会打印 AUTH_HELP
 ```
 
 脚本遇 401/未登录会抛 `AuthError` 并附刷新说明；**禁止**把 Cookie 写入 Skill 或缺陷描述。
@@ -64,7 +64,7 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 |---|---|
 | 已修复 → 已关闭 | `批量关闭已修复` |
 | 已修复 → 再次打开 | `再次打开` |
-| （任务）→ 已完成 | `闭环测试任务` |
+| （任务）→ 已完成 | 仅`完成测试`，并通过部署、QA证据清单和逐Bug复测门禁 |
 
 **禁止**测试侧：`→已修复` / `→暂不修复` / `→处理中`（开发 Skill）。
 
@@ -73,8 +73,11 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 优先用脚本（含强制关联校验）：
 
 ```bash
-python3 scripts/create_bug.py --mode 本期 --title '…' --test-task DEMO-xx \
-  --assignee 沈辰 --verifier 王冕 --description-html '<p>…</p>'
+skill-run create_bug.py --mode 本期 --source standalone --title '…' --test-task DEMO-xx `
+  --assignee 沈辰 --description-html '<p>…</p>'
+
+skill-run create_bug.py --mode 本期 --source test-case --test-case CASE-1001 `
+  --title '…' --test-task DEMO-xx --assignee 沈辰 --description-html '<p>…</p>'
 ```
 
 ```http
@@ -84,7 +87,7 @@ POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 - `workitemType` / `workitemTypeIdentifier` = `37da3a07df4d08aef2e3b393`
 - `category` = `Bug`
 - 负责人：`assignedTo`
-- 验证者：`workitem.verifier`（user id）
+- 验证者：`workitem.verifier`（user id）。请求不接受验证者覆盖；创建后从云效新建记录取得当前会话用户，必要时用工作项字段`COVER`写入并从`/extra`回读。
 - 优先级 / 严重程度：见 runtime-ids `fields.priority` / `seriousLevel`
 - 描述：`PATCH …/workitem/{id}/document`，`{"content":"<html>","formatType":"RICHTEXT"}`
 - **本期关联**：
@@ -108,7 +111,7 @@ PATCH /projex/api/workitem/workitem/{id}?_input_charset=utf-8
 
 ## 校验
 
-每次 apply 后回读：标题、状态、负责人、验证者、关联、sprint；与 Plan 不一致则停。
+每次 apply 后回读：标题、状态、负责人、验证者、关联、sprint；其中验证者必须等于云效记录的当前创建会话用户，与 Plan 不一致则停。
 
 **编号硬门禁（强制）**：回读 `serialNumber` 必须等于口令/Plan 编号；回报一行：
 
@@ -118,11 +121,15 @@ ONEOS-xx | 【测试】标题… | 处理中→已完成
 
 对不上立刻停。**禁止**用浏览器点列表改状态（历史误关 ONEOS-309 当 343）。
 
-### 闭环【测试】脚本
+### 已停用的旧闭环脚本
 
 ```bash
-python3 scripts/close_test_task.py --sn ONEOS-xx --dry-run
-python3 scripts/close_test_task.py --sn ONEOS-xx
+skill-run close_test_task.py --sn ONEOS-xx --dry-run
 ```
 
-退出码：`0` 成功；`2` 鉴权；`3` 编号/状态回读失败；`4` 关联缺陷未闭环。
+该脚本固定返回退出码`4`且不写状态。唯一完整入口是：
+
+```powershell
+skill-run transit_test_lifecycle.py complete --test-sn ONEOS-xx --req-sn ONEOS-yy `
+  --evidence-manifest C:\evidence\ONEOS-xx.json --dry-run
+```

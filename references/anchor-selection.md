@@ -35,13 +35,13 @@ Plan 汇总 → 用户「确认/执行」→ create_bug.py --test-task … [--re
 
 ```bash
 # 测试任务字母表（默认待处理+处理中）
-python3 scripts/list_bug_anchors.py --gate test
+skill-run list_bug_anchors.py --gate test
 
 # 口令预填
-python3 scripts/list_bug_anchors.py --gate test --match DEMO-90
+skill-run list_bug_anchors.py --gate test --match DEMO-90
 
 # 已选测试后拉需求候选（描述追溯用）
-python3 scripts/list_bug_anchors.py --gate req --test-task DEMO-90
+skill-run list_bug_anchors.py --gate req --test-task DEMO-90
 ```
 
 stdout 含：

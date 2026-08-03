@@ -1,10 +1,10 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """按状态拉取缺陷。stdout=JSON。
 
 示例：
-  python3 scripts/list_bugs.py --status 已修复 --status 暂不修复
-  python3 scripts/list_bugs.py --status 待确认
-  python3 scripts/list_bugs.py --status 已关闭 --limit 20
+  skill-run list_bugs.py --status 已修复 --status 暂不修复
+  skill-run list_bugs.py --status 待确认
+  skill-run list_bugs.py --status 已关闭 --limit 20
 """
 from __future__ import annotations
 

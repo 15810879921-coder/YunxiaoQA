@@ -1,9 +1,9 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """探测云效会话是否可用。stdout=JSON。
 
 示例：
-  python3 scripts/check_auth.py
-  python3 scripts/check_auth.py --space 65eca0c2e16a23939081e19e14
+  skill-run check_auth.py
+  skill-run check_auth.py --space 65eca0c2e16a23939081e19e14
 """
 from __future__ import annotations
 

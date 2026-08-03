@@ -1,15 +1,15 @@
-#!/usr/bin/env python3
+#!/usr/bin/env python
 """发起缺陷 · 挂载点选：输出【测试】/需求字母表与 AskQuestion 载荷。
 
 示例：
   # 第一步：点选测试任务
-  python3 scripts/list_bug_anchors.py --gate test
+  skill-run list_bug_anchors.py --gate test
 
   # 第二步：已选测试任务后点选需求（含自动追溯候选）
-  python3 scripts/list_bug_anchors.py --gate req --test-task DEMO-90
+  skill-run list_bug_anchors.py --gate req --test-task DEMO-90
 
   # 口令已给编号时做唯一校验 / 预勾建议
-  python3 scripts/list_bug_anchors.py --gate test --match DEMO-90
+  skill-run list_bug_anchors.py --gate test --match DEMO-90
 """
 from __future__ import annotations
 
