@@ -6,11 +6,11 @@
 | `check_auth.py` | 探测会话是否可用；失败打印刷新说明 |
 | `refresh_cookies.py` | 从本机 Chrome 导出 Cookie → 当前系统临时目录 |
 | `list_bug_anchors.py` | **挂载点选**：【测试】/需求字母表 + AskQuestion 载荷 |
-| `list_test_tasks.py` | 拉【测试】待处理/处理中 |
+| `list_test_tasks.py` | 拉【测试】已分配/处理中（待处理仅兼容历史任务） |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
 | `create_bug.py` | **发起缺陷**（独立/测试用例共同入口；验证者强制当前登录用户；ASSOCIATED→【测试】） |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭时强制逐Bug复测证据；再次打开保留原证据（含编号回读） |
-| `transit_test_lifecycle.py` | **完整测试闭环**：校验test部署和真实QA证据清单，同步需求状态，写证据并回读 |
+| `transit_test_lifecycle.py` | **完整测试闭环**：开始时【测试】已分配→处理中、需求→测试中；完成时同步【测试】、需求与父【交付】，写证据并回读 |
 | `close_test_task.py` | 已停用的旧入口：固定拒绝写入并指向完整闭环命令 |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |
 

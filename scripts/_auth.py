@@ -11,7 +11,9 @@ from typing import Any
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text())
+RUNTIME = json.loads(
+    (ROOT / "assets" / "runtime-ids.json").read_text(encoding="utf-8")
+)
 SPACE = (
     (RUNTIME.get("project") or {}).get("last_selected") or {}
 ).get("spaceIdentifier") or "1280be963a5a2cc126a4118dca"
@@ -78,7 +80,7 @@ def resolve_person(name_or_id: str) -> tuple[str, str]:
 def load_jar() -> dict[str, str]:
     jar: dict[str, str] = {}
     if COOKIE_FALLBACK.exists():
-        raw = json.loads(COOKIE_FALLBACK.read_text())
+        raw = json.loads(COOKIE_FALLBACK.read_text(encoding="utf-8"))
         if isinstance(raw, dict) and "XSRF-TOKEN" in raw:
             jar = {k: v for k, v in raw.items() if isinstance(v, str)}
         elif isinstance(raw, dict) and "cookies" in raw:
@@ -146,7 +148,10 @@ def dump_chrome_cookies(path: Path | None = None) -> dict[str, str]:
         keep["AONE_SESSION"] = jar["AONE_SESSION"]
     # 仍不够时写全量 jar（仍仅写入本机系统临时目录）
     payload = keep if keep.get("XSRF-TOKEN") or keep.get("AONE_SESSION") else jar
-    out.write_text(json.dumps(payload, ensure_ascii=False, indent=2))
+    out.write_text(
+        json.dumps(payload, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
     return payload
 
 

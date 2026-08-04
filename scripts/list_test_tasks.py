@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-"""拉取【测试】任务（默认待处理+处理中）。stdout=JSON。
+"""拉取【测试】任务（默认已分配+处理中）。stdout=JSON。
 
 示例：
   skill-run list_test_tasks.py
@@ -24,14 +24,14 @@ def main() -> None:
     ap.add_argument(
         "--status",
         action="append",
-        choices=["待处理", "处理中", "已完成", "已取消"],
-        help="可重复；默认 待处理+处理中",
+        choices=["已分配", "待处理", "处理中", "已完成", "已取消"],
+        help="可重复；默认 已分配+处理中（待处理仅兼容历史任务）",
     )
     ap.add_argument("--space", default=None)
     ap.add_argument("--page-size", type=int, default=50)
     args = ap.parse_args()
 
-    names = args.status or ["待处理", "处理中"]
+    names = args.status or ["已分配", "处理中"]
     ids = [status_id("task", n) for n in names]
     space = space_id(args.space)
     s = session()

@@ -16,7 +16,9 @@ except ImportError:
     browser_cookie3 = None
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text())
+RUNTIME = json.loads(
+    (ROOT / "assets" / "runtime-ids.json").read_text(encoding="utf-8")
+)
 ORG = RUNTIME["project"]["organizationIdentifier"]
 SPACE = (RUNTIME.get("project", {}).get("last_selected") or {}).get(
     "spaceIdentifier"
@@ -35,7 +37,7 @@ def load_jar() -> dict[str, str]:
     if not jar.get("XSRF-TOKEN"):
         p = Path(tempfile.gettempdir()) / "yunxiao_cookies.json"
         if p.exists():
-            raw = json.loads(p.read_text())
+            raw = json.loads(p.read_text(encoding="utf-8"))
             jar = (
                 raw
                 if isinstance(raw, dict) and "XSRF-TOKEN" in raw

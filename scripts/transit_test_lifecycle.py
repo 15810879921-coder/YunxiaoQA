@@ -2,9 +2,9 @@
 """推进测试生命周期，并同步需求状态与可审计证据。
 
 支持三个动作：
-  start:    【测试】待处理→处理中；需求待测试→测试中
+  start:    【测试】已分配→处理中；需求待测试→测试中
   record:   在测试进行中幂等写入并回读计划/用例/执行/报告
-  complete: 写入测试证据；【测试】处理中→已完成；需求测试中→测试完成
+  complete: 写入测试证据；【测试】→已完成；需求→测试完成；父【交付】→已完成
 
 所有写操作均要求先运行 --dry-run，并通过 YunxiaoQA Plan 门禁确认。
 """
@@ -48,6 +48,11 @@ DEPLOY_SCHEMA = "oneos.test-deployment/v1"
 BUG_RETEST_START = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_START -->"
 BUG_RETEST_END = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_END -->"
 BUG_RETEST_SCHEMA = "oneos.bug-retest/v1"
+ACTION_STATES = {
+    "start": ("已分配", "处理中", "待测试", "测试中"),
+    "complete": ("处理中", "已完成", "测试中", "测试完成"),
+}
+DELIVERY_COMPLETE_FROM = {"已分配", "待处理", "处理中"}
 
 
 def same_serial(left: object, right: object) -> bool:
@@ -132,8 +137,15 @@ def resolve_context(
     return test, req, delivery
 
 
+def item_meta(item: dict[str, Any]) -> dict[str, Any]:
+    """同时兼容详情对象和已经 brief_item 处理过的对象。"""
+    if item.get("id") and isinstance(item.get("status"), str):
+        return item
+    return brief_item(item)
+
+
 def current_status(item: dict[str, Any]) -> tuple[str, str]:
-    meta = brief_item(item)
+    meta = item_meta(item)
     name = str(meta.get("status") or "")
     identifier = str(meta.get("statusId") or "")
     if not name or not identifier:
@@ -146,18 +158,25 @@ def current_status(item: dict[str, Any]) -> tuple[str, str]:
 def transition_plan(
     s,
     item: dict[str, Any],
-    expected_from: str,
+    expected_from: str | set[str],
     target: str,
-) -> dict[str, str]:
-    meta = brief_item(item)
+) -> dict[str, Any]:
+    meta = item_meta(item)
     name, identifier = current_status(item)
-    if name != expected_from:
+    allowed = {expected_from} if isinstance(expected_from, str) else expected_from
+    if name == target:
+        target_id = identifier
+        already_done = True
+    elif name not in allowed:
         raise RuntimeError(
-            f"{meta.get('serialNumber')} 当前状态「{name}」，期望「{expected_from}」"
+            f"{meta.get('serialNumber')} 当前状态「{name}」，期望源状态"
+            f"{sorted(allowed)}或目标状态「{target}」"
         )
-    target_id = resolve_next_status_id(
-        s, str(meta["id"]), identifier, target
-    )
+    else:
+        target_id = resolve_next_status_id(
+            s, str(meta["id"]), identifier, target
+        )
+        already_done = False
     return {
         "id": str(meta["id"]),
         "serialNumber": str(meta.get("serialNumber") or ""),
@@ -166,7 +185,33 @@ def transition_plan(
         "fromId": identifier,
         "to": target,
         "toId": target_id,
+        "alreadyDone": already_done,
     }
+
+
+def build_transition_plans(
+    s,
+    action: str,
+    test: dict[str, Any],
+    req: dict[str, Any],
+    delivery: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """按写入顺序预检测试、需求，以及完成阶段的父【交付】。"""
+    test_from, test_to, req_from, req_to = ACTION_STATES[action]
+    plans = [
+        transition_plan(s, test, test_from, test_to),
+        transition_plan(s, req, req_from, req_to),
+    ]
+    if action == "complete":
+        plans.append(
+            transition_plan(
+                s,
+                delivery,
+                DELIVERY_COMPLETE_FROM,
+                "已完成",
+            )
+        )
+    return plans
 
 
 def collect_bugs(s, test_id: str, deployed_version: str) -> list[dict[str, Any]]:
@@ -461,7 +506,7 @@ def evidence_block(
     )
 
 
-def readback(s, plan: dict[str, str]) -> dict[str, Any]:
+def readback(s, plan: dict[str, Any]) -> dict[str, Any]:
     after = brief_item(get_workitem(s, plan["id"]))
     if not same_serial(after.get("serialNumber"), plan["serialNumber"]):
         raise RuntimeError(
@@ -507,6 +552,7 @@ def main() -> None:
         )
         test_meta = brief_item(test)
         req_meta = brief_item(req)
+        delivery_meta = item_meta(delivery)
         deployment = test_deployment_evidence(test, req_meta, test_meta, space)
         evidence: dict[str, Any] | None = None
         evidence_digest = ""
@@ -571,35 +617,16 @@ def main() -> None:
             print(json.dumps(record_output | {"dryRun": False}, ensure_ascii=False, indent=2))
             return
 
-        action_states = {
-            "start": ("待处理", "处理中", "待测试", "测试中"),
-            "complete": ("处理中", "已完成", "测试中", "测试完成"),
-        }
-        test_from, test_to, req_from, req_to = action_states[args.action]
-
-        if test_meta.get("status") == test_to and req_meta.get("status") == req_to:
-            print(
-                json.dumps(
-                    {
-                        "ok": True,
-                        "alreadyDone": True,
-                        "test": test_meta,
-                        "requirement": req_meta,
-                    },
-                    ensure_ascii=False,
-                    indent=2,
-                )
-            )
-            return
-
-        test_plan = transition_plan(s, test, test_from, test_to)
-        req_plan = transition_plan(s, req, req_from, req_to)
+        plans = build_transition_plans(s, args.action, test, req, delivery)
+        test_plan, req_plan = plans[:2]
+        delivery_plan = plans[2] if len(plans) == 3 else None
         output: dict[str, Any] = {
             "ok": True,
             "dryRun": args.dry_run,
             "action": args.action,
-            "delivery": delivery,
-            "wouldTransit": [test_plan, req_plan],
+            "delivery": delivery_meta,
+            "wouldTransit": plans,
+            "alreadyDone": all(plan["alreadyDone"] for plan in plans),
         }
 
         block = ""
@@ -693,20 +720,22 @@ def main() -> None:
             if BLOCK_START not in reread_document or BLOCK_END not in reread_document:
                 raise RuntimeError("测试证据写入后回读失败；状态尚未推进")
 
-        transit(
-            s,
-            test_plan["id"],
-            test_plan["fromId"],
-            test_plan["toId"],
-        )
-        test_after = readback(s, test_plan)
-        try:
+        if not test_plan["alreadyDone"]:
             transit(
                 s,
-                req_plan["id"],
-                req_plan["fromId"],
-                req_plan["toId"],
+                test_plan["id"],
+                test_plan["fromId"],
+                test_plan["toId"],
             )
+        test_after = readback(s, test_plan)
+        try:
+            if not req_plan["alreadyDone"]:
+                transit(
+                    s,
+                    req_plan["id"],
+                    req_plan["fromId"],
+                    req_plan["toId"],
+                )
             req_after = readback(s, req_plan)
         except Exception as error:
             raise RuntimeError(
@@ -714,9 +743,27 @@ def main() -> None:
                 f"必须人工审计后再处理：{error}"
             ) from error
 
+        delivery_after = delivery_meta
+        if delivery_plan is not None:
+            try:
+                if not delivery_plan["alreadyDone"]:
+                    transit(
+                        s,
+                        delivery_plan["id"],
+                        delivery_plan["fromId"],
+                        delivery_plan["toId"],
+                    )
+                delivery_after = readback(s, delivery_plan)
+            except Exception as error:
+                raise RuntimeError(
+                    "父【交付】状态推进失败；【测试】与需求可能已完成，"
+                    f"必须按编号人工审计后再处理：{error}"
+                ) from error
+
         output["after"] = {
             "test": test_after,
             "requirement": req_after,
+            "delivery": delivery_after,
         }
         if args.action == "complete":
             output["handoff"] = {
@@ -724,7 +771,7 @@ def main() -> None:
                 "targetSkill": "yunxiao-release-operations",
                 "requirement": req_after,
                 "testTask": test_after,
-                "deliveryTask": delivery,
+                "deliveryTask": delivery_after,
                 "iteration": {
                     "id": deployment["iterationId"],
                     "name": deployment["iterationName"],

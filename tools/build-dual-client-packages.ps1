@@ -1,11 +1,15 @@
 [CmdletBinding()]
 param(
-    [string]$OutputRoot = (Join-Path $PSScriptRoot '..\packages')
+    [string]$OutputRoot
 )
 
 $ErrorActionPreference = 'Stop'
-$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot '..'))
+$scriptRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
+$repoRoot = [System.IO.Path]::GetFullPath((Join-Path $scriptRoot '..'))
 $skillName = 'YunxiaoQA'
+if ([string]::IsNullOrWhiteSpace($OutputRoot)) {
+    $OutputRoot = Join-Path $repoRoot 'packages'
+}
 $resolvedOutput = [System.IO.Path]::GetFullPath($OutputRoot)
 $tempBase = [System.IO.Path]::GetFullPath([System.IO.Path]::GetTempPath())
 $tempRoot = Join-Path $tempBase ('oneos-qa-skill-' + [guid]::NewGuid().ToString('N'))

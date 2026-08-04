@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/15810879921-coder/YunxiaoQA)](https://skills.sh/15810879921-coder/YunxiaoQA)
 
-测试同学在支持 Skill 的 Agent 里操作**阿里云效 Projex**：拉【测试】任务、发起缺陷、关闭/再次打开、闭环测试任务。
+测试同学在支持 Skill 的 Agent 里操作**阿里云效 Projex**：拉【测试】任务、开始测试并同步需求、发起缺陷、关闭/再次打开、闭环测试并同步需求与父【交付】。
 **只做测试侧**；不建【开发】/【测试】任务、不创建迭代、不代开发标「已修复」。
 
 ## 发给测试 AI / 同事的一键安装
@@ -101,13 +101,13 @@ skill-run refresh_cookies.py --probe
 
 | 能力 | 状态 |
 |---|---|
-| 拉取【测试】待处理/处理中 | ✅ |
+| 拉取【测试】已分配/处理中 | ✅ |
 | 挂载点选【测试】/需求 | ✅ `list_bug_anchors.py` + AskQuestion |
 | 独立发起缺陷（当前用户=验证者；ASSOCIATED→【测试】） | ✅ `create_bug.py --source standalone` |
 | 从测试用例发起缺陷（同一验证者门禁） | ✅ `create_bug.py --source test-case` |
 | 发起缺陷（非本期） | ✅ |
 | 已修复→已关闭 / 再次打开 | ✅ `transit_bug.py`；关闭时强制逐Bug复测证据 |
-| 开始/完成测试并同步需求状态 | ✅ `transit_test_lifecycle.py`（先校验test部署和证据清单，再双侧回读） |
+| 开始/完成测试并同步关联状态 | ✅ `transit_test_lifecycle.py`（开始双侧、完成三侧逐项回读） |
 | 测试计划/执行/报告证据 | ✅ 读取`oneos.qa-evidence/v1`真实JSON清单并记录SHA-256，不接受口令自报 |
 | 发布/验收失败修复回流 | ✅ 接收回流→正式Bug→开发修复→逐Bug复测→回归→重新发布 |
 

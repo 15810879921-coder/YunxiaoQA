@@ -27,7 +27,7 @@ skill-run check_auth.py                # 仅探测；失败会打印 AUTH_HELP
 | 下一状态 | `GET /projex/api/workitem/workitem/{id}/nextStatus/list?currentStatusIdentifier={from}` |
 | Bug 字段字典 | `GET /projex/api/workitem/workitem/field/listAllFields?spaceType=Project&spaceIdentifier={space}&categoryIdentifier=Bug` |
 
-拉【测试】：`category=Task` + 标题前缀 `【测试】` + 状态 `待处理`/`处理中`。
+拉【测试】：`category=Task` + 标题前缀 `【测试】` + 状态 `已分配`/`处理中`。
 
 ## 写 · 状态流转
 
@@ -53,6 +53,7 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 
 | 显示名 | identifier |
 |---|---|
+| 已分配 | `826f7669c292445a6aafb3bb35` |
 | 待处理 | `100005` |
 | 处理中 | `100010` |
 | 已完成 | `100014` |
@@ -62,11 +63,17 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 
 | 从 → 到 | 口令 |
 |---|---|
+| （【测试】）已分配 → 处理中 | `开始测试` |
+| （需求）待测试 → 测试中 | `开始测试`联动 |
 | 已修复 → 已关闭 | `批量关闭已修复` |
 | 已修复 → 再次打开 | `再次打开` |
-| （任务）→ 已完成 | 仅`完成测试`，并通过部署、QA证据清单和逐Bug复测门禁 |
+| （【测试】）处理中 → 已完成 | `完成测试`，并通过部署、QA证据清单和逐Bug复测门禁 |
+| （需求）测试中 → 测试完成 | `完成测试`联动 |
+| （父【交付】）已分配\|待处理\|处理中 → 已完成 | `完成测试`联动 |
 
 **禁止**测试侧：`→已修复` / `→暂不修复` / `→处理中`（开发 Skill）。
+
+上条`→处理中`仅指缺陷；【测试】任务允许在`开始测试`中从已分配进入处理中。
 
 ## 写 · 建缺陷
 

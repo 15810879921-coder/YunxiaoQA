@@ -12,7 +12,7 @@ flowchart TB
     Retest["测试：拉取待验"]
     Close["逐Bug复测证据回读后批量关闭"]
     Reopen["复现 → 再次打开"]
-    DoneT["缺陷闭环且风险获批 →【测试】已完成、需求测试完成"]
+    DoneT["缺陷闭环且风险获批 →【测试】已完成、需求测试完成、父【交付】已完成"]
     Release["输出发布候选交接"]
     TPull --> Manual --> FileBug
     FileBug --> DevFix --> Retest
@@ -68,9 +68,9 @@ flowchart TB
 5. 【测试】正式`TASK_SUB→【交付】`且`ASSOCIATED→需求`；需求当前为`测试中`。
 6. 【测试】中的`oneos.test-deployment/v1`为test环境成功终态，项目、迭代、需求、测试任务和待测版本均与QA证据一致。
 
-满足后：`完成测试`先写入并回读证据，再将【测试】`处理中→已完成`、需求`测试中→测试完成`，并输出发布候选交接。
+满足后：`完成测试`先写入并回读证据，再依次将【测试】`处理中→已完成`、需求`测试中→测试完成`、父【交付】活动态→`已完成`，并输出发布候选交接。
 
-**唯一完整写入口**：`scripts/transit_test_lifecycle.py complete ... --evidence-manifest <证据清单.json>`（先`--dry-run`，API `transit` + 两侧回读）。
+**唯一完整写入口**：`scripts/transit_test_lifecycle.py complete ... --evidence-manifest <证据清单.json>`（先`--dry-run`，API `transit` + 三侧回读）。
 **禁止**浏览器点「已完成」。
 
 `scripts/close_test_task.py`已停用并始终拒绝写入，防止绕过部署、QA清单或逐Bug复测门禁。
@@ -106,4 +106,4 @@ flowchart TB
 |---|---|
 | YunxiaoPM | 需求/交付/分析/设计/创建迭代；**不建【测试】** |
 | yunxiao-development-delivery | 建【开发】、提测建【测试】、缺陷→已修复\|暂不修复 |
-| **YunxiaoQA（本 Skill）** | 开始测试、记录证据、提缺陷、回归闭环、推进需求测试完成、交接发布 |
+| **YunxiaoQA（本 Skill）** | 开始测试、记录证据、提缺陷、回归闭环、推进需求测试完成与父【交付】已完成、交接发布 |

@@ -1,12 +1,12 @@
 ---
 name: YunxiaoQA
 description: >-
-  测试人员云效（Projex）自动化：接收并开始【测试】任务，推进需求待测试→测试中，
+  测试人员云效（Projex）自动化：接收并开始【测试】任务，将【测试】已分配→处理中，推进需求待测试→测试中，
   从可核验测试证据清单记录计划、用例执行、报告和test部署证据，诊断查重后一键发起缺陷；
   独立建缺陷和测试用例建缺陷均强制将验证者设置为当前登录测试用户并回读，
   （本期交付绑定开发负责人 / 非本期自指定负责人），拉取已修复|暂不修复待验清单，
   仅在每个Bug具有独立复测通过证据后批量关闭已修复、再次打开复现缺陷、已关闭并入当期迭代；缺陷闭环且暂不修复均有批准证据后，
-  将【测试】标已完成、需求推进测试完成并输出正式发布候选交接。
+  将【测试】标已完成、需求推进测试完成、父【交付】同步已完成并输出正式发布候选交接。
   用户说 YunxiaoQA、测试任务、拉取测试任务、发起缺陷、再次打开、批量关闭、并入迭代、
   开始测试、记录测试证据、完成测试、闭环测试任务、接收发布回流、验证发布回流、交接发布 时使用。
   仅测试角色；不建【开发】/不创建迭代/不代开发改已修复。
@@ -21,7 +21,7 @@ description: >-
 
 与 **YunxiaoPM（需求任务）**、开发交付 Skill 分工：本 Skill **只做测试侧**读写。
 
-闭环版本：`2.4.0`。
+闭环版本：`2.4.1`。
 
 ## Plan 模式门禁（强制 · 凡写云效）
 
@@ -48,10 +48,10 @@ description: >-
 本期负责人=同交付【开发】负责人
 缺陷打开态 = 待确认（禁止再用「待处理」指缺陷）
 查重/复用 = 优先编号；禁止只按模糊标题瞎改他人单
-测试可改状态 = 已修复→已关闭 | 已修复→再次打开 |（闭环）【测试】→已完成
-测试阶段状态 = 【测试】待处理→处理中→已完成；需求待测试→测试中→测试完成
+测试可改状态 = 已修复→已关闭 | 已修复→再次打开 |（开始）【测试】已分配→处理中，需求→测试中 |（闭环）【测试】→已完成，需求→测试完成，父【交付】→已完成
+测试阶段状态 = 【测试】已分配→处理中→已完成；需求待测试→测试中→测试完成；父【交付】活动态→已完成
 测试不改     = 待确认/再次打开/处理中 → 已修复|暂不修复|处理中（开发侧）
-【测试】任务打开态 = 待处理 / 处理中（任务状态名，与缺陷待确认不同）
+【测试】任务打开态 = 已分配 / 处理中（待处理仅兼容历史任务；与缺陷待确认不同）
 产品不建迭代 = 本 Skill 只把已关闭缺陷挂到已有当期迭代
 发布候选真相 = 完成态【测试】+ 测试证据块 + 测试完成需求 + 正式关系
 常量       = assets/runtime-ids.json（2026-07-27 01_ONEOS 已实网补齐）
@@ -67,7 +67,7 @@ description: >-
 | 挂载点选【测试】/需求 | [references/anchor-selection.md](references/anchor-selection.md) · `scripts/list_bug_anchors.py` |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
 | 测试执行闭环 | [references/test-execution.md](references/test-execution.md) · `scripts/transit_test_lifecycle.py` |
-| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `close_test_task.py` |
+| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `transit_test_lifecycle.py` / `close_test_task.py` |
 | 跨平台脚本启动 | [references/runtime-launcher.md](references/runtime-launcher.md) · `skill-run <script.py> [参数...]` |
 
 日常测试**优先本 Skill**；不必再挂载英文 `yunxiao-bug-triage`（诊断要点已收入本 Skill）。
@@ -85,7 +85,7 @@ description: >-
 1. **禁止**用 `cursor-ide-browser` / DOM 点击 /「可交互节点」改云效状态、负责人、关联、迭代。
 2. **唯一写路径**：本 Skill `scripts/*.py`（Cookie/`refresh_cookies` / 页内 `fetch` 仅用于鉴权，不用于点列表）。
 3. **编号硬门禁**：口令 `ONEOS-xx` → 脚本 `--sn` → `serialNumber ==` 精确匹配 → apply → **回读** `serialNumber|subject|from→to`；任一不对立刻停。
-4. **开始/记录/完成测试**：只用 `skill-run transit_test_lifecycle.py start|record|complete ... --dry-run` 后再 apply；`skill-run` 按 [references/runtime-launcher.md](references/runtime-launcher.md) 解析。脚本必须先验证`oneos.test-deployment/v1`提测部署区块，record/complete必须读取`oneos.qa-evidence/v1`证据清单并回读证据及两侧编号/状态。
+4. **开始/记录/完成测试**：只用 `skill-run transit_test_lifecycle.py start|record|complete ... --dry-run` 后再 apply；`skill-run` 按 [references/runtime-launcher.md](references/runtime-launcher.md) 解析。开始时【测试】已分配→处理中、需求→测试中；完成时【测试】→已完成、需求→测试完成、父【交付】→已完成。脚本必须先验证`oneos.test-deployment/v1`提测部署区块，record/complete必须读取`oneos.qa-evidence/v1`证据清单并逐项回读编号/状态。
 5. **旧闭环入口**：`close_test_task.py`已停用并固定拒绝写入；`闭环测试任务`兼容口令也必须转入`transit_test_lifecycle.py complete`完整门禁。
 6. Cookie/鉴权挂了：只许 `refresh_cookies.py` / `check_auth.py`，**禁止**改走浏览器点选「凑合关单」。
 
@@ -106,7 +106,7 @@ description: >-
 ## 口令速查
 
 ```text
-拉取测试任务：状态=待处理|处理中；[项目=…]
+拉取测试任务：状态=已分配|处理中；[项目=…]
 开始测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]
 记录测试证据：测试任务=ONEOS-xx；证据清单=<JSON文件>
 发起缺陷：标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[证据=…]
@@ -147,19 +147,19 @@ description: >-
 
 执行`完成测试`前必须同时满足：
 
-1. 【测试】=`处理中`且正式`TASK_SUB→【交付】`、`ASSOCIATED→需求`。
+1. 【测试】=`处理中`且正式`TASK_SUB→【交付】`、`ASSOCIATED→需求`；父【交付】处于已分配/待处理/处理中之一，或已完成。
 2. 需求=`测试中`。
 3. 开发交接中的`oneos.test-deployment/v1`区块表明正常需求版本已成功部署到test，且项目、迭代、需求、测试任务、执行ID和部署版本均一致。
 4. `oneos.qa-evidence/v1`证据清单已从真实测试资产读取并校验，包含计划ID/URL、用例执行ID/URL、报告ID/URL、test部署执行和SHA-256；禁止用聊天参数、自填“0失败”或占位链接代替。
 5. 无未执行、失败或阻塞用例，且总数等于通过、失败、阻塞、未执行之和。
 6. 无`待确认/处理中/已修复/再次打开`缺陷；每条已关闭Bug均带独立`oneos.bug-retest/v1`复测通过证据。
 7. 每条`暂不修复`缺陷都有明确批准人和证据；只有状态没有批准证据仍阻塞。
-8. 证据块写入并回读后，才依次推进【测试】→`已完成`、需求→`测试完成`。
+8. 证据块写入并回读后，才依次推进【测试】→`已完成`、需求→`测试完成`、父【交付】→`已完成`。
 9. 输出项目、必填迭代、需求、交付、测试任务、部署版本、缺陷状态、证据清单哈希、完成时间和幂等键，交给`$yunxiao-release-operations`组建发布批次。
 
 ## 本 Skill 终点与明确不做
 
-- **终点**：完成测试执行与缺陷闭环，推进需求到测试完成，并输出可机器校验的发布候选交接。
+- **终点**：完成测试执行与缺陷闭环，推进需求到测试完成、父【交付】到已完成，并输出可机器校验的发布候选交接。
 - **明确不做：** 创建【开发】/【测试】任务、代开发标「已修复/暂不修复」、创建迭代、改产品/开发阶段状态、挂仓库/开分支/提 MR。
 - 本 Skill明确拥有且只拥有需求测试阶段`待测试→测试中→测试完成`。
 
@@ -170,14 +170,14 @@ description: >-
 
 ## 验收清单（回报自检）
 
-- [ ] 拉【测试】：仅待处理/处理中（或口令指定）
-- [ ] 开始测试：【测试】待处理→处理中；需求待测试→测试中；两侧均回读
+- [ ] 拉【测试】：仅已分配/处理中（待处理仅口令显式指定）
+- [ ] 开始测试：【测试】已分配→处理中；需求待测试→测试中；两侧均回读
 - [ ] 发起缺陷（独立/测试用例）：验证者=当前登录用户且已回读；负责人/关联正确；走过查重+模板
 - [ ] 再次打开：仅自「已修复」且有复现说明；负责人未误改
 - [ ] 批量关闭：逐Bug复测证据已写入并回读；仅「已修复」→「已关闭」
 - [ ] 并入迭代：仅「已关闭」；迭代已存在（未新建）
 - [ ] 完成测试：test部署与QA证据清单已校验，证据块已写并回读；关联缺陷全部闭环；暂不修复均有批准证据
-- [ ] 状态闭环：【测试】处理中→已完成；需求测试中→测试完成；两侧均回读
+- [ ] 状态闭环：【测试】处理中→已完成；需求测试中→测试完成；父【交付】活动态→已完成；三侧均回读
 - [ ] 发布交接：项目/迭代/需求/交付/测试证据/幂等键完整
 - [ ] 每次写操作回报含一行：`serialNumber | subject | from→to`（与口令编号一致）
 - [ ] 本轮无浏览器改状态；无建【开发】、无创建迭代、无代开发改状态
