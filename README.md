@@ -2,7 +2,7 @@
 
 [![skills.sh](https://skills.sh/b/15810879921-coder/YunxiaoQA)](https://skills.sh/15810879921-coder/YunxiaoQA)
 
-测试同学在支持 Skill 的 Agent 里操作**阿里云效 Projex**：拉【测试】任务、开始测试并同步需求、发起缺陷、关闭/再次打开、闭环测试并同步需求与父【交付】。
+测试同学在支持 Skill 的 Agent 里操作**阿里云效 Projex**：拉【测试】任务、开始测试并同步需求、证据化发起缺陷、上传附件、记录复测评论、关闭/再次打开、闭环测试并同步需求与父【交付】。
 **只做测试侧**；不建【开发】/【测试】任务、不创建迭代、不代开发标「已修复」。
 
 ## 发给测试 AI / 同事的一键安装
@@ -72,6 +72,7 @@ gh api -X PUT repos/15810879921-coder/YunxiaoQA/collaborators/<GitHub用户名> 
 从测试用例发起缺陷：测试用例=CASE-xx；标题=…；测试任务=ONEOS-xx；负责人=…
 发起缺陷(非本期)：标题=…；负责人=…
 拉取待验缺陷
+验证已修复的bug：每张单评论结果；通过则关闭，复现则上传证据并再次打开
 批量关闭已修复：缺陷=ONEOS-a,ONEOS-b；逐条提供复测用例、复测执行、test版本、证据和当前验证人
 再次打开：缺陷=ONEOS-xx；原因=复现说明
 完成测试：测试任务=ONEOS-xx；需求=ONEOS-yy；证据清单=<oneos.qa-evidence/v1 JSON文件>
@@ -106,6 +107,7 @@ skill-run refresh_cookies.py --probe
 | 独立发起缺陷（当前用户=验证者；ASSOCIATED→【测试】） | ✅ `create_bug.py --source standalone` |
 | 从测试用例发起缺陷（同一验证者门禁） | ✅ `create_bug.py --source test-case` |
 | 发起缺陷（非本期） | ✅ |
+| 标签回读、附件上传、验证评论和安全字段回填 | ✅ `create_bug.py` + `attach_bug.py` + `comment_bug.py` + `set_bug_fields.py` |
 | 已修复→已关闭 / 再次打开 | ✅ `transit_bug.py`；关闭时强制逐Bug复测证据 |
 | 开始/完成测试并同步关联状态 | ✅ `transit_test_lifecycle.py`（开始双侧、完成三侧逐项回读） |
 | 测试计划/执行/报告证据 | ✅ 读取`oneos.qa-evidence/v1`真实JSON清单并记录SHA-256，不接受口令自报 |
@@ -129,6 +131,9 @@ skill-run refresh_cookies.py --probe
     ├── list_test_tasks.py
     ├── list_bugs.py
     ├── create_bug.py
+    ├── attach_bug.py
+    ├── comment_bug.py
+    ├── set_bug_fields.py
     ├── transit_bug.py
     ├── transit_test_lifecycle.py
     └── close_test_task.py（已停用，只返回完整闭环命令）

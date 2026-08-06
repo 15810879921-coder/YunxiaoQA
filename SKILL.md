@@ -2,12 +2,12 @@
 name: YunxiaoQA
 description: >-
   测试人员云效（Projex）自动化：接收并开始【测试】任务，将【测试】已分配→处理中，推进需求待测试→测试中，
-  从可核验测试证据清单记录计划、用例执行、报告和test部署证据，诊断查重后一键发起缺陷；
+  从可核验测试证据清单记录计划、用例执行、报告和test部署证据，诊断查重后一键发起带标签和附件的缺陷；
   独立建缺陷和测试用例建缺陷均强制将验证者设置为当前登录测试用户并回读，
-  （本期交付绑定开发负责人 / 非本期自指定负责人），拉取已修复|暂不修复待验清单，
+  （本期交付绑定开发负责人 / 非本期自指定负责人），拉取已修复|暂不修复待验清单并写入复测评论，
   仅在每个Bug具有独立复测通过证据后批量关闭已修复、再次打开复现缺陷、已关闭并入当期迭代；缺陷闭环且暂不修复均有批准证据后，
   将【测试】标已完成、需求推进测试完成、父【交付】同步已完成并输出正式发布候选交接。
-  用户说 YunxiaoQA、测试任务、拉取测试任务、发起缺陷、再次打开、批量关闭、并入迭代、
+  用户说 YunxiaoQA、测试任务、拉取测试任务、发起缺陷、验证已修复的bug、再次打开、批量关闭、并入迭代、
   开始测试、记录测试证据、完成测试、闭环测试任务、接收发布回流、验证发布回流、交接发布 时使用。
   仅测试角色；不建【开发】/不创建迭代/不代开发改已修复。
   凡写云效先 Plan 确认再一口气 apply；禁止对齐 yunxiao-requirement-lifecycle。
@@ -21,7 +21,7 @@ description: >-
 
 与 **YunxiaoPM（需求任务）**、开发交付 Skill 分工：本 Skill **只做测试侧**读写。
 
-闭环版本：`2.4.1`。
+闭环版本：`2.4.2`。
 
 ## Plan 模式门禁（强制 · 凡写云效）
 
@@ -67,7 +67,7 @@ description: >-
 | 挂载点选【测试】/需求 | [references/anchor-selection.md](references/anchor-selection.md) · `scripts/list_bug_anchors.py` |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
 | 测试执行闭环 | [references/test-execution.md](references/test-execution.md) · `scripts/transit_test_lifecycle.py` |
-| 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `transit_test_lifecycle.py` / `close_test_task.py` |
+| 列表/建缺/附件/评论/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `attach_bug.py` / `comment_bug.py` / `set_bug_fields.py` / `transit_bug.py` / `transit_test_lifecycle.py` / `close_test_task.py` |
 | 跨平台脚本启动 | [references/runtime-launcher.md](references/runtime-launcher.md) · `skill-run <script.py> [参数...]` |
 
 日常测试**优先本 Skill**；不必再挂载英文 `yunxiao-bug-triage`（诊断要点已收入本 Skill）。
@@ -89,6 +89,17 @@ description: >-
 5. **旧闭环入口**：`close_test_task.py`已停用并固定拒绝写入；`闭环测试任务`兼容口令也必须转入`transit_test_lifecycle.py complete`完整门禁。
 6. Cookie/鉴权挂了：只许 `refresh_cookies.py` / `check_auth.py`，**禁止**改走浏览器点选「凑合关单」。
 
+## 已修复缺陷回归（强制）
+
+用户说「验证已修复的bug」「拉取未关闭缺陷验证」或同义口令时：
+
+1. 只用`list_bugs.py --status 已修复`拉当前待验单，逐张精确读取编号、标题、描述、验收条件和关联测试任务。
+2. 在受控业务系统窗口做回归；云效写入仍只用本 Skill 脚本，禁止用云效 DOM 点评论或状态。
+3. 业务系统先做只读验证。若下一步会保存、提交、审批或创建/修改业务数据，停在按钮前说明目标、影响与验证目的，等待用户确认。
+4. **通过**：形成可复核的样本、关键数值、环境和版本；Plan 确认后先用`comment_bug.py`写测试结果评论，再用`transit_bug.py --to 已关闭`写入并回读该 Bug 的`oneos.bug-retest/v1`证据后关单。
+5. **仍复现**：保留必要截图/文件；Plan 确认后依次用`attach_bug.py`上传证据、`comment_bug.py`写复现结果，再用`transit_bug.py --to 再次打开`流转。
+6. 条件不足、角色无权限或无法确认验收基准：标记「未判定」，不评论、不改状态；说明缺失条件。用户临时指定的跳过/保持不变只作用于本次指令，不固化为全局编号规则。
+
 ## 路由（按需完整阅读）
 
 | 场景 | 模块 |
@@ -109,9 +120,9 @@ description: >-
 拉取测试任务：状态=已分配|处理中；[项目=…]
 开始测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]
 记录测试证据：测试任务=ONEOS-xx；证据清单=<JSON文件>
-发起缺陷：标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[证据=…]
-从测试用例发起缺陷：测试用例=CASE-xx；标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[证据=…]
-发起缺陷(非本期)：标题=…；描述=…；负责人=…；[测试任务=…]；[项目=…]
+发起缺陷：标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[标签=…]；[附件=文件1,文件2]
+从测试用例发起缺陷：测试用例=CASE-xx；标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[标签=…]；[附件=…]
+发起缺陷(非本期)：标题=…；描述=…；负责人=…；[测试任务=…]；[标签=…]；[附件=…]；[项目=…]
 # 无测试任务的非本期须显式声明，默认仍要求挂测试子项+需求
 拉取待验缺陷：状态=已修复|暂不修复；[测试任务=…]；[负责人=…]
 批量关闭已修复：缺陷=ONEOS-a；复测用例=CASE-ID；复测执行=RUN-ID；test版本=VERSION；证据=ID或URL；验证人=当前用户
@@ -130,10 +141,10 @@ description: >-
 每次 `发起缺陷` / `从测试用例发起缺陷` / `发起缺陷(非本期)`：
 
 1. **规范化证据**（环境、路径、角色、时间、步骤、实际/期望、截图；无秘密）
-2. **查重**（活跃 + 近期关闭；同因则更新旧单并回报，不问则新建）
+2. **查重**（活跃 + 近期关闭；同因则更新旧单并回报；apply 前标题完全一致的已有缺陷会硬阻断）
 3. **分层初判**（前端/后端/数据/配置/环境；标「推断」）
 4. **填模板** → 见 [bug-template.md](references/bug-template.md)
-5. **字段**：验证者=当前登录测试用户，禁止口令覆盖；本期负责人=同交付【开发】负责人（多人 Plan 点选）；非本期负责人=口令必填
+5. **字段**：验证者=当前登录测试用户，禁止口令覆盖；本期负责人=同交付【开发】负责人（多人 Plan 点选）；非本期负责人=口令必填；标签须实时解析为 identifier 并回读
    - 独立创建：`create_bug.py --source standalone`
    - 测试用例创建：`create_bug.py --source test-case --test-case <用例编号/执行记录>`
    - 两条路径必须进入同一个建单处理器。apply 后以云效在新建 Bug 上记录的当前会话用户为真相，写入`workitem.verifier`并回读；不以固定姓名、负责人、开发人、测试主管或口令参数代替。
@@ -141,7 +152,7 @@ description: >-
 6. **关联**：
    - **硬门禁**：缺陷 **create 时**挂 `ASSOCIATED→【测试】`（关联项；**禁止** TASK_SUB/父子）；回读 ASSOCIATED 校验，失败退出码 3。
    - **需求**：点选/追溯后写入描述「追溯需求」段；**不做** Cookie 事后 `ASSOCIATED→需求`（不告警、不伪造成功）。口令 `需求=` / `--req` 可覆盖。
-7. Plan 回显 → 确认 → apply（`create_bug.py`）→ 回读当前用户=验证者及【测试】关联 → 回报；任一校验失败须停
+7. Plan 回显 → 确认 → apply（`create_bug.py`）→ 回读当前用户=验证者、标签及【测试】关联 → 按附件清单逐个调用`attach_bug.py`并回读 → 回报；任一校验失败须停
 
 ## 测试完成硬门禁
 
@@ -172,7 +183,8 @@ description: >-
 
 - [ ] 拉【测试】：仅已分配/处理中（待处理仅口令显式指定）
 - [ ] 开始测试：【测试】已分配→处理中；需求待测试→测试中；两侧均回读
-- [ ] 发起缺陷（独立/测试用例）：验证者=当前登录用户且已回读；负责人/关联正确；走过查重+模板
+- [ ] 发起缺陷（独立/测试用例）：验证者=当前登录用户且已回读；负责人/标签/关联正确；附件逐个上传回读；走过查重+模板
+- [ ] 已修复回归：每张单都有测试结果评论；通过单有独立复测证据并关闭，复现单有证据并再次打开
 - [ ] 再次打开：仅自「已修复」且有复现说明；负责人未误改
 - [ ] 批量关闭：逐Bug复测证据已写入并回读；仅「已修复」→「已关闭」
 - [ ] 并入迭代：仅「已关闭」；迭代已存在（未新建）
