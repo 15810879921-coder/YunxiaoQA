@@ -6,14 +6,12 @@
 | `check_auth.py` | 探测会话是否可用；失败打印刷新说明 |
 | `refresh_cookies.py` | 从本机 Chrome 导出 Cookie → 当前系统临时目录 |
 | `list_bug_anchors.py` | **挂载点选**：【测试】/需求字母表 + AskQuestion 载荷 |
-| `list_test_tasks.py` | 拉【测试】已分配/处理中（待处理仅兼容历史任务） |
+| `list_test_tasks.py` | 拉【测试】待处理/处理中 |
 | `list_bugs.py` | 按状态拉缺陷（默认已修复+暂不修复） |
-| `create_bug.py` | **发起缺陷**（独立/测试用例共同入口；标题完全重复硬阻断；标签、验证者和ASSOCIATED→【测试】均回读） |
-| `attach_bug.py` | 幂等上传一个或多个截图/PDF等证据到指定缺陷，并按文件名+大小回读 |
-| `comment_bug.py` | 幂等写入测试结果/复现结果评论，并回读验证 |
-| `set_bug_fields.py` | 白名单字段安全回填（负责人、优先级、严重程度、迭代、标签、验证者）并回读 |
+| `create_bug.py` | **发起缺陷**（独立/测试用例共同入口；验证者强制当前登录用户；ASSOCIATED→【测试】） |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭时强制逐Bug复测证据；再次打开保留原证据（含编号回读） |
-| `transit_test_lifecycle.py` | **完整测试闭环**：开始时【测试】已分配→处理中、需求→测试中；完成时同步【测试】、需求与父【交付】，写证据并回读 |
+| `yunxiao_cli_test_lifecycle.py` | **当前完整测试闭环**：官方CLI校验test部署、TestHub、真实QA证据和Bug，同步需求状态，写证据并回读 |
+| `transit_test_lifecycle.py` | 旧Cookie兼容实现；新执行禁止使用 |
 | `close_test_task.py` | 已停用的旧入口：固定拒绝写入并指向完整闭环命令 |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |
 
@@ -47,13 +45,7 @@ skill-run create_bug.py --mode 本期 --source standalone --title '[模块] 问�
   --test-task DEMO-90 --assignee 沈辰 --dry-run
 skill-run create_bug.py --mode 本期 --source standalone --title '[模块] 问题简述' `
   --test-task DEMO-90 --assignee 沈辰 `
-  --tag-id TAG-ID --tag-name 模块标签 `
   --description-html '<p>实际…</p><p>期望…</p>'
-
-skill-run attach_bug.py --sn DEMO-91 --file C:\evidence\actual.png `
-  --file C:\evidence\request.pdf --dry-run
-skill-run comment_bug.py --sn DEMO-91 `
-  --message '测试结果：test版本复测通过，实际与预期一致。' --dry-run
 
 skill-run create_bug.py --mode 本期 --source test-case --test-case CASE-1001 `
   --title '[模块] 问题简述' --test-task DEMO-90 --assignee 沈辰 --dry-run
@@ -66,33 +58,35 @@ skill-run transit_bug.py --sn DEMO-91 --from 已修复 --to 已关闭 `
   --retest-evidence https://example.invalid/evidence/RUN-9001 `
   --environment test --deployed-version v2026.07.31.1 --verified-by USER-1 --dry-run
 
-# 开始测试（先 dry-run；禁止浏览器点状态）
-skill-run transit_test_lifecycle.py start --test-sn ONEOS-343 --req-sn ONEOS-300 --dry-run
-
 # 测试中记录证据（读取真实证据清单，不推进状态）
-skill-run transit_test_lifecycle.py record --test-sn ONEOS-343 --req-sn ONEOS-300 `
-  --evidence-manifest C:\evidence\ONEOS-343.json --dry-run
+skill-run yunxiao_cli_test_lifecycle.py record --space-id <项目ID> `
+  --test-sn ONEOS-343 --req-sn ONEOS-300 `
+  --evidence-manifest C:\evidence\ONEOS-343.json `
+  --idempotency-key qa-ONEOS-343-v1
 
-# 完成测试（先dry-run；必须提供真实证据清单）
-skill-run transit_test_lifecycle.py complete --test-sn ONEOS-343 --req-sn ONEOS-300 `
-  --evidence-manifest C:\evidence\ONEOS-343.json --dry-run
+# 开始测试（先预检；同一命令加 --apply 才写入）
+skill-run yunxiao_cli_test_lifecycle.py start --space-id <项目ID> `
+  --test-sn ONEOS-343 --req-sn ONEOS-300 `
+  --idempotency-key qa-start-ONEOS-343
+
+# 完成测试（先预检；同一命令加 --apply 才写入）
+skill-run yunxiao_cli_test_lifecycle.py complete --space-id <项目ID> `
+  --test-sn ONEOS-343 --req-sn ONEOS-300 `
+  --evidence-manifest C:\evidence\ONEOS-343.json `
+  --idempotency-key qa-ONEOS-343-v1
 ```
 
-`create_bug.py` / `transit_bug.py` / `transit_test_lifecycle.py` 为写操作：须先走 YunxiaoQA **Plan 门禁**，用户确认后再去掉 `--dry-run` 执行。`close_test_task.py`始终拒绝写入。
+`create_bug.py` / `transit_bug.py` / `yunxiao_cli_test_lifecycle.py` 为写操作：须先走 YunxiaoQA **Plan 门禁**，用户确认后再加`--apply`或去掉旧脚本的`--dry-run`执行。`close_test_task.py`始终拒绝写入。
 **禁止**用浏览器 DOM 点击改云效状态。
 
 ### `create_bug.py` 退出码
 
 | code | 含义 |
 |---|---|
-| 0 | 成功（含当前用户=验证者、标签和关联校验通过） |
+| 0 | 成功（含当前用户=验证者、关联校验通过） |
 | 2 | 鉴权失败 |
 | 3 | 已建单但 ASSOCIATED 回读失败（须重试/UI 确认，勿事后补关联） |
 | 4 | 已建单但当前会话用户无法解析，或验证者写入/回读不一致 |
-| 5 | 发现标题完全一致的已有缺陷，阻止重复创建 |
-| 6 | 已建单但标签回读不一致 |
-
-`attach_bug.py`、`comment_bug.py`与`set_bug_fields.py`：`0`成功/幂等命中，`2`鉴权失败，`3`写入后回读不一致。
 
 ### `close_test_task.py` / `transit_bug.py` 退出码
 

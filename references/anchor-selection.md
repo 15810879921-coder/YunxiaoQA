@@ -34,7 +34,7 @@ Plan 汇总 → 用户「确认/执行」→ create_bug.py --test-task … [--re
 ## 脚本
 
 ```bash
-# 测试任务字母表（默认已分配+处理中；待处理仅兼容历史任务）
+# 测试任务字母表（默认待处理+处理中）
 skill-run list_bug_anchors.py --gate test
 
 # 口令预填

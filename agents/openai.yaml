@@ -1,4 +1,4 @@
 interface:
   display_name: "云效测试闭环"
-  short_description: "执行云效测试闭环、证据化提缺陷、附件评论与回归验收"
-  default_prompt: "使用 $YunxiaoQA 拉取测试任务，按证据门禁提缺陷并完成回归闭环。"
+  short_description: "执行测试、创建缺陷、复测关闭并交接生产发布"
+  default_prompt: "使用 $YunxiaoQA 接收测试任务并完成测试与缺陷闭环。"

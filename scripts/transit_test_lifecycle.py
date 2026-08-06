@@ -2,9 +2,9 @@
 """推进测试生命周期，并同步需求状态与可审计证据。
 
 支持三个动作：
-  start:    【测试】已分配→处理中；需求待测试→测试中
+  start:    【测试】待处理→处理中；需求待测试→测试中
   record:   在测试进行中幂等写入并回读计划/用例/执行/报告
-  complete: 写入测试证据；【测试】→已完成；需求→测试完成；父【交付】→已完成
+  complete: 写入测试证据；【测试】处理中→已完成；需求测试中→测试完成
 
 所有写操作均要求先运行 --dry-run，并通过 YunxiaoQA Plan 门禁确认。
 """
@@ -45,14 +45,10 @@ DEPLOY_START = "<!-- ONEOS_TEST_DEPLOYMENT_EVIDENCE_START -->"
 DEPLOY_END = "<!-- ONEOS_TEST_DEPLOYMENT_EVIDENCE_END -->"
 QA_SCHEMA = "oneos.qa-evidence/v1"
 DEPLOY_SCHEMA = "oneos.test-deployment/v1"
+SKIP_PIPELINE_ENDS = {"小程序"}
 BUG_RETEST_START = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_START -->"
 BUG_RETEST_END = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_END -->"
 BUG_RETEST_SCHEMA = "oneos.bug-retest/v1"
-ACTION_STATES = {
-    "start": ("已分配", "处理中", "待测试", "测试中"),
-    "complete": ("处理中", "已完成", "测试中", "测试完成"),
-}
-DELIVERY_COMPLETE_FROM = {"已分配", "待处理", "处理中"}
 
 
 def same_serial(left: object, right: object) -> bool:
@@ -137,15 +133,8 @@ def resolve_context(
     return test, req, delivery
 
 
-def item_meta(item: dict[str, Any]) -> dict[str, Any]:
-    """同时兼容详情对象和已经 brief_item 处理过的对象。"""
-    if item.get("id") and isinstance(item.get("status"), str):
-        return item
-    return brief_item(item)
-
-
 def current_status(item: dict[str, Any]) -> tuple[str, str]:
-    meta = item_meta(item)
+    meta = brief_item(item)
     name = str(meta.get("status") or "")
     identifier = str(meta.get("statusId") or "")
     if not name or not identifier:
@@ -158,25 +147,18 @@ def current_status(item: dict[str, Any]) -> tuple[str, str]:
 def transition_plan(
     s,
     item: dict[str, Any],
-    expected_from: str | set[str],
+    expected_from: str,
     target: str,
-) -> dict[str, Any]:
-    meta = item_meta(item)
+) -> dict[str, str]:
+    meta = brief_item(item)
     name, identifier = current_status(item)
-    allowed = {expected_from} if isinstance(expected_from, str) else expected_from
-    if name == target:
-        target_id = identifier
-        already_done = True
-    elif name not in allowed:
+    if name != expected_from:
         raise RuntimeError(
-            f"{meta.get('serialNumber')} 当前状态「{name}」，期望源状态"
-            f"{sorted(allowed)}或目标状态「{target}」"
+            f"{meta.get('serialNumber')} 当前状态「{name}」，期望「{expected_from}」"
         )
-    else:
-        target_id = resolve_next_status_id(
-            s, str(meta["id"]), identifier, target
-        )
-        already_done = False
+    target_id = resolve_next_status_id(
+        s, str(meta["id"]), identifier, target
+    )
     return {
         "id": str(meta["id"]),
         "serialNumber": str(meta.get("serialNumber") or ""),
@@ -185,36 +167,12 @@ def transition_plan(
         "fromId": identifier,
         "to": target,
         "toId": target_id,
-        "alreadyDone": already_done,
     }
 
 
-def build_transition_plans(
-    s,
-    action: str,
-    test: dict[str, Any],
-    req: dict[str, Any],
-    delivery: dict[str, Any],
+def collect_bugs(
+    s, test_id: str, deployed_version: str, *, match_version: bool = True
 ) -> list[dict[str, Any]]:
-    """按写入顺序预检测试、需求，以及完成阶段的父【交付】。"""
-    test_from, test_to, req_from, req_to = ACTION_STATES[action]
-    plans = [
-        transition_plan(s, test, test_from, test_to),
-        transition_plan(s, req, req_from, req_to),
-    ]
-    if action == "complete":
-        plans.append(
-            transition_plan(
-                s,
-                delivery,
-                DELIVERY_COMPLETE_FROM,
-                "已完成",
-            )
-        )
-    return plans
-
-
-def collect_bugs(s, test_id: str, deployed_version: str) -> list[dict[str, Any]]:
     seen: set[str] = set()
     bugs: list[dict[str, Any]] = []
     for getter, forward in (
@@ -249,7 +207,11 @@ def collect_bugs(s, test_id: str, deployed_version: str) -> list[dict[str, Any]]
                         retest.get("schemaVersion") == BUG_RETEST_SCHEMA
                         and str(retest.get("result") or "").lower() == "passed"
                         and str(retest.get("environment") or "").lower() == "test"
-                        and retest_version == str(deployed_version)
+                        and (
+                            retest_version == str(deployed_version)
+                            if match_version
+                            else True
+                        )
                         and all(
                             valid_ref(retest.get(field))
                             for field in (
@@ -319,10 +281,15 @@ def valid_ref(value: object) -> bool:
     )
 
 
+def is_skip_deployment(value: dict[str, Any]) -> bool:
+    return str(value.get("testPipeline") or "").lower() == "skipped"
+
+
 def test_deployment_evidence(
     test: dict[str, Any], req_meta: dict[str, Any], test_meta: dict[str, Any], space: str
 ) -> dict[str, Any]:
     data = parse_json_block(document_content(test), DEPLOY_START, DEPLOY_END)
+    skipped = is_skip_deployment(data)
     required = {
         "schemaVersion",
         "projectId",
@@ -330,14 +297,15 @@ def test_deployment_evidence(
         "iterationName",
         "requirementId",
         "testTaskId",
-        "executionId",
-        "environment",
         "status",
-        "deployedVersion",
-        "evidenceUrl",
         "completedAt",
         "idempotencyKey",
     }
+    required |= (
+        {"deliveryEnd", "testPipeline", "reason"}
+        if skipped
+        else {"executionId", "environment", "deployedVersion", "evidenceUrl"}
+    )
     missing = sorted(required - set(data))
     if missing:
         raise RuntimeError(f"test部署证据缺字段：{missing}")
@@ -355,21 +323,37 @@ def test_deployment_evidence(
         str(test_meta.get("serialNumber") or ""),
     }:
         raise RuntimeError("test部署证据测试任务编号不一致")
-    if str(data["environment"]).lower() != "test" or str(data["status"]).lower() not in {
-        "成功",
-        "success",
-        "succeeded",
-    }:
-        raise RuntimeError("正常需求提测前必须有成功的test环境部署")
-    for field in (
-        "iterationId",
-        "iterationName",
-        "executionId",
-        "deployedVersion",
-        "evidenceUrl",
-        "completedAt",
-        "idempotencyKey",
-    ):
+    if skipped:
+        if str(data["deliveryEnd"]) not in SKIP_PIPELINE_ENDS:
+            raise RuntimeError("只有小程序交付允许跳过test流水线")
+        if str(data["status"]).lower() not in {"skipped", "跳过", "已跳过"}:
+            raise RuntimeError("跳过区块status必须标记为skipped")
+        fields = (
+            "iterationId",
+            "iterationName",
+            "reason",
+            "completedAt",
+            "idempotencyKey",
+        )
+    else:
+        if str(data["environment"]).lower() != "test" or str(
+            data["status"]
+        ).lower() not in {
+            "成功",
+            "success",
+            "succeeded",
+        }:
+            raise RuntimeError("正常需求提测前必须有成功的test环境部署")
+        fields = (
+            "iterationId",
+            "iterationName",
+            "executionId",
+            "deployedVersion",
+            "evidenceUrl",
+            "completedAt",
+            "idempotencyKey",
+        )
+    for field in fields:
         if not valid_ref(data[field]):
             raise RuntimeError(f"test部署证据字段无效：{field}")
     return data
@@ -424,9 +408,17 @@ def load_evidence_manifest(
     deployed = data.get("testDeployment")
     if not isinstance(deployed, dict):
         raise RuntimeError("测试证据清单testDeployment必须是对象")
-    for field in ("executionId", "deployedVersion", "evidenceUrl"):
-        if str(deployed.get(field) or "") != str(deployment[field]):
-            raise RuntimeError(f"测试证据清单与提测部署字段不一致：{field}")
+    if is_skip_deployment(deployment):
+        if not is_skip_deployment(deployed) or str(
+            deployed.get("deliveryEnd") or ""
+        ) != str(deployment["deliveryEnd"]):
+            raise RuntimeError(
+                "小程序跳过test流水线时，清单testDeployment必须写deliveryEnd与testPipeline=skipped"
+            )
+    else:
+        for field in ("executionId", "deployedVersion", "evidenceUrl"):
+            if str(deployed.get(field) or "") != str(deployment[field]):
+                raise RuntimeError(f"测试证据清单与提测部署字段不一致：{field}")
     plan = data.get("testPlan")
     run = data.get("caseRun")
     report = data.get("report")
@@ -506,7 +498,7 @@ def evidence_block(
     )
 
 
-def readback(s, plan: dict[str, Any]) -> dict[str, Any]:
+def readback(s, plan: dict[str, str]) -> dict[str, Any]:
     after = brief_item(get_workitem(s, plan["id"]))
     if not same_serial(after.get("serialNumber"), plan["serialNumber"]):
         raise RuntimeError(
@@ -552,7 +544,6 @@ def main() -> None:
         )
         test_meta = brief_item(test)
         req_meta = brief_item(req)
-        delivery_meta = item_meta(delivery)
         deployment = test_deployment_evidence(test, req_meta, test_meta, space)
         evidence: dict[str, Any] | None = None
         evidence_digest = ""
@@ -571,7 +562,10 @@ def main() -> None:
                 )
             approvals = parse_approvals(args.risk_approval)
             bugs = collect_bugs(
-                s, str(test_meta["id"]), str(deployment["deployedVersion"])
+                s,
+                str(test_meta["id"]),
+                str(deployment.get("deployedVersion") or ""),
+                match_version=not is_skip_deployment(deployment),
             )
             key_source = "|".join(
                 [
@@ -617,16 +611,35 @@ def main() -> None:
             print(json.dumps(record_output | {"dryRun": False}, ensure_ascii=False, indent=2))
             return
 
-        plans = build_transition_plans(s, args.action, test, req, delivery)
-        test_plan, req_plan = plans[:2]
-        delivery_plan = plans[2] if len(plans) == 3 else None
+        action_states = {
+            "start": ("待处理", "处理中", "待测试", "测试中"),
+            "complete": ("处理中", "已完成", "测试中", "测试完成"),
+        }
+        test_from, test_to, req_from, req_to = action_states[args.action]
+
+        if test_meta.get("status") == test_to and req_meta.get("status") == req_to:
+            print(
+                json.dumps(
+                    {
+                        "ok": True,
+                        "alreadyDone": True,
+                        "test": test_meta,
+                        "requirement": req_meta,
+                    },
+                    ensure_ascii=False,
+                    indent=2,
+                )
+            )
+            return
+
+        test_plan = transition_plan(s, test, test_from, test_to)
+        req_plan = transition_plan(s, req, req_from, req_to)
         output: dict[str, Any] = {
             "ok": True,
             "dryRun": args.dry_run,
             "action": args.action,
-            "delivery": delivery_meta,
-            "wouldTransit": plans,
-            "alreadyDone": all(plan["alreadyDone"] for plan in plans),
+            "delivery": delivery,
+            "wouldTransit": [test_plan, req_plan],
         }
 
         block = ""
@@ -641,7 +654,10 @@ def main() -> None:
                 )
             approvals = parse_approvals(args.risk_approval)
             bugs = collect_bugs(
-                s, test_plan["id"], str(deployment["deployedVersion"])
+                s,
+                test_plan["id"],
+                str(deployment.get("deployedVersion") or ""),
+                match_version=not is_skip_deployment(deployment),
             )
             active = [
                 bug
@@ -720,22 +736,20 @@ def main() -> None:
             if BLOCK_START not in reread_document or BLOCK_END not in reread_document:
                 raise RuntimeError("测试证据写入后回读失败；状态尚未推进")
 
-        if not test_plan["alreadyDone"]:
-            transit(
-                s,
-                test_plan["id"],
-                test_plan["fromId"],
-                test_plan["toId"],
-            )
+        transit(
+            s,
+            test_plan["id"],
+            test_plan["fromId"],
+            test_plan["toId"],
+        )
         test_after = readback(s, test_plan)
         try:
-            if not req_plan["alreadyDone"]:
-                transit(
-                    s,
-                    req_plan["id"],
-                    req_plan["fromId"],
-                    req_plan["toId"],
-                )
+            transit(
+                s,
+                req_plan["id"],
+                req_plan["fromId"],
+                req_plan["toId"],
+            )
             req_after = readback(s, req_plan)
         except Exception as error:
             raise RuntimeError(
@@ -743,27 +757,9 @@ def main() -> None:
                 f"必须人工审计后再处理：{error}"
             ) from error
 
-        delivery_after = delivery_meta
-        if delivery_plan is not None:
-            try:
-                if not delivery_plan["alreadyDone"]:
-                    transit(
-                        s,
-                        delivery_plan["id"],
-                        delivery_plan["fromId"],
-                        delivery_plan["toId"],
-                    )
-                delivery_after = readback(s, delivery_plan)
-            except Exception as error:
-                raise RuntimeError(
-                    "父【交付】状态推进失败；【测试】与需求可能已完成，"
-                    f"必须按编号人工审计后再处理：{error}"
-                ) from error
-
         output["after"] = {
             "test": test_after,
             "requirement": req_after,
-            "delivery": delivery_after,
         }
         if args.action == "complete":
             output["handoff"] = {
@@ -771,7 +767,7 @@ def main() -> None:
                 "targetSkill": "yunxiao-release-operations",
                 "requirement": req_after,
                 "testTask": test_after,
-                "deliveryTask": delivery_after,
+                "deliveryTask": delivery,
                 "iteration": {
                     "id": deployment["iterationId"],
                     "name": deployment["iterationName"],

@@ -26,10 +26,8 @@ skill-run check_auth.py                # 仅探测；失败会打印 AUTH_HELP
 | 关联列表 | `GET /projex/api/workitem/v2/workitem/{id}/relation/workitem/list/by-relation-category?category=ASSOCIATED\|PARENT_SUB&isForward=true` |
 | 下一状态 | `GET /projex/api/workitem/workitem/{id}/nextStatus/list?currentStatusIdentifier={from}` |
 | Bug 字段字典 | `GET /projex/api/workitem/workitem/field/listAllFields?spaceType=Project&spaceIdentifier={space}&categoryIdentifier=Bug` |
-| 附件列表 | `GET /projex/api/workitem/workitem/{id}/attachment/list` |
-| 评论列表 | `GET /projex/api/workitem/workitem/{id}/comment/list` |
 
-拉【测试】：`category=Task` + 标题前缀 `【测试】` + 状态 `已分配`/`处理中`。
+拉【测试】：`category=Task` + 标题前缀 `【测试】` + 状态 `待处理`/`处理中`。
 
 ## 写 · 状态流转
 
@@ -55,7 +53,6 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 
 | 显示名 | identifier |
 |---|---|
-| 已分配 | `826f7669c292445a6aafb3bb35` |
 | 待处理 | `100005` |
 | 处理中 | `100010` |
 | 已完成 | `100014` |
@@ -65,17 +62,11 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 
 | 从 → 到 | 口令 |
 |---|---|
-| （【测试】）已分配 → 处理中 | `开始测试` |
-| （需求）待测试 → 测试中 | `开始测试`联动 |
 | 已修复 → 已关闭 | `批量关闭已修复` |
 | 已修复 → 再次打开 | `再次打开` |
-| （【测试】）处理中 → 已完成 | `完成测试`，并通过部署、QA证据清单和逐Bug复测门禁 |
-| （需求）测试中 → 测试完成 | `完成测试`联动 |
-| （父【交付】）已分配\|待处理\|处理中 → 已完成 | `完成测试`联动 |
+| （任务）→ 已完成 | 仅`完成测试`，并通过部署、QA证据清单和逐Bug复测门禁 |
 
 **禁止**测试侧：`→已修复` / `→暂不修复` / `→处理中`（开发 Skill）。
-
-上条`→处理中`仅指缺陷；【测试】任务允许在`开始测试`中从已分配进入处理中。
 
 ## 写 · 建缺陷
 
@@ -98,26 +89,12 @@ POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 - 负责人：`assignedTo`
 - 验证者：`workitem.verifier`（user id）。请求不接受验证者覆盖；创建后从云效新建记录取得当前会话用户，必要时用工作项字段`COVER`写入并从`/extra`回读。
 - 优先级 / 严重程度：见 runtime-ids `fields.priority` / `seriousLevel`
-- 标签：创建载荷`tag=[tagIdentifier]`；identifier须实时解析，创建后回读；标题完全一致的已有缺陷会在apply前阻断
 - 描述：`PATCH …/workitem/{id}/document`，`{"content":"<html>","formatType":"RICHTEXT"}`
 - **本期关联**：
   1. `createWorkitemRelationInfo` = `ASSOCIATED` →【测试】；回读 ASSOCIATED（**勿用 TASK_SUB/父子**）；失败 → 退出码 3
   2. 产品需求：写入描述「追溯需求」段；**不做**事后 `ASSOCIATED→需求`（Cookie 第二挂常报「不能关联相同的工作项」；已去掉告警+伪备注口径）
 
 新建默认状态一般为 **待确认**。
-
-## 写 · 附件与评论
-
-附件必须走`attach_bug.py`：先`GET .../{id}/attachment/upload/info?fileName=...`取得OSS凭证，上传OSS后`POST .../{id}/attachfile`绑定，最后从附件列表按文件名+大小回读。重复执行命中同名同大小附件时幂等跳过。
-
-评论必须走`comment_bug.py`：
-
-```http
-POST /projex/api/workitem/workitem/{id}/comment?_input_charset=utf-8
-{"content":"<RICHTEXT JSON>","formatType":"RICHTEXT"}
-```
-
-写后从评论列表回读全部非空文本行；已有完全相同评论时幂等跳过。已修复回归通过与仍复现都必须留下测试结果评论。
 
 ## 写 · 关联 / 迭代
 
@@ -153,6 +130,6 @@ skill-run close_test_task.py --sn ONEOS-xx --dry-run
 该脚本固定返回退出码`4`且不写状态。唯一完整入口是：
 
 ```powershell
-skill-run transit_test_lifecycle.py complete --test-sn ONEOS-xx --req-sn ONEOS-yy `
-  --evidence-manifest C:\evidence\ONEOS-xx.json --dry-run
+skill-run yunxiao_cli_test_lifecycle.py complete --space-id <项目ID> --test-sn ONEOS-xx --req-sn ONEOS-yy `
+  --evidence-manifest C:\evidence\ONEOS-xx.json --idempotency-key qa-ONEOS-xx-v1
 ```

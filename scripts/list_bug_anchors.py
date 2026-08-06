@@ -162,8 +162,8 @@ def main() -> None:
     ap.add_argument(
         "--status",
         action="append",
-        choices=["已分配", "待处理", "处理中", "已完成", "已取消"],
-        help="测试任务状态；默认 已分配+处理中（待处理仅兼容历史任务）",
+        choices=["待处理", "处理中", "已完成", "已取消"],
+        help="测试任务状态；默认 待处理+处理中",
     )
     args = ap.parse_args()
 
@@ -183,7 +183,7 @@ def main() -> None:
     }
 
     if args.gate in ("test", "both"):
-        statuses = args.status or ["已分配", "处理中"]
+        statuses = args.status or ["待处理", "处理中"]
         items = list_open_tests(s, space, statuses, args.page_size)
         filtered, match_state = match_filter(items, args.match)
         options, letter_map = letter_options(
@@ -206,7 +206,7 @@ def main() -> None:
                 "options": options,
             },
             "letters": letter_map,
-            "emptyHint": "无已分配/处理中【测试】：请先让开发提测建【测试】，或扩大 --status",
+            "emptyHint": "无待处理/处理中【测试】：请先让开发提测建【测试】，或扩大 --status",
         }
         if not options:
             result["ok"] = False

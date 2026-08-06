@@ -2,7 +2,7 @@
 """已停用的旧测试闭环入口。
 
 该入口无法同时校验正常需求test部署、QA证据清单和逐Bug复测证据，
-因此始终拒绝写入。请使用 transit_test_lifecycle.py complete。
+因此始终拒绝写入。请使用 yunxiao_cli_test_lifecycle.py complete。
 """
 from __future__ import annotations
 
@@ -50,9 +50,10 @@ def main() -> None:
                 "ignoredArguments": unknown,
                 "message": "旧入口不能证明完整测试闭环，已禁止状态写入。",
                 "nextCommand": (
-                    "skill-run transit_test_lifecycle.py complete "
-                    f"--test-sn {args.sn.strip()} --req-sn <需求编号> "
-                    "--evidence-manifest <证据清单.json> --dry-run"
+                    "skill-run yunxiao_cli_test_lifecycle.py complete "
+                    f"--space-id <项目ID> --test-sn {args.sn.strip()} --req-sn <需求编号> "
+                    "--evidence-manifest <证据清单.json> "
+                    f"--idempotency-key qa-{args.sn.strip()}-v1"
                 ),
             },
             ensure_ascii=False,

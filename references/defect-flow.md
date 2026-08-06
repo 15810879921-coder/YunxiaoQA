@@ -12,7 +12,7 @@ flowchart TB
     Retest["测试：拉取待验"]
     Close["逐Bug复测证据回读后批量关闭"]
     Reopen["复现 → 再次打开"]
-    DoneT["缺陷闭环且风险获批 →【测试】已完成、需求测试完成、父【交付】已完成"]
+    DoneT["缺陷闭环且风险获批 →【测试】已完成、需求测试完成"]
     Release["输出发布候选交接"]
     TPull --> Manual --> FileBug
     FileBug --> DevFix --> Retest
@@ -60,17 +60,17 @@ flowchart TB
 条件（全部满足）：
 
 1. 工作项为标题前缀 `【测试】` 的任务（或项目约定的测试任务类型）。
-2. 与之正式关联的缺陷集合中，**每一条**状态 ∈ {`暂不修复`, `已关闭`}；每条`已关闭`都有自己的`oneos.bug-retest/v1`且版本匹配本次test部署，每条`暂不修复`都有批准人和批准证据。
+2. 与之正式关联的缺陷集合中，**每一条**状态 ∈ {`暂不修复`, `已关闭`}；每条`已关闭`都有自己的`oneos.bug-retest/v1`（**Web**版本须匹配本次test部署；**小程序**为跳过流水线交付，只要求复测版本非空且为小程序测试版本标识），每条`暂不修复`都有批准人和批准证据。
    集合来源：与【测试】**ASSOCIATED** 的缺陷（双向；兼容旧 PARENT 残留）。
 3. 不存在 `待确认` / `处理中` / `已修复` / `再次打开` 等未闭环缺陷。
 
 4. 已校验真实`oneos.qa-evidence/v1`文件：测试计划、执行记录、报告ID/URL完整，文件哈希已记录，未执行/失败/阻塞用例均为0。
 5. 【测试】正式`TASK_SUB→【交付】`且`ASSOCIATED→需求`；需求当前为`测试中`。
-6. 【测试】中的`oneos.test-deployment/v1`为test环境成功终态，项目、迭代、需求、测试任务和待测版本均与QA证据一致。
+6. 【测试】中的`oneos.test-deployment/v1`按端侧核验：**Web**为test环境成功终态，项目、迭代、需求、测试任务和待测版本均与QA证据一致；**小程序**为`deliveryEnd=小程序`+`testPipeline=skipped`+`status=skipped`且含`reason`，项目、迭代、需求、测试任务一致。
 
-满足后：`完成测试`先写入并回读证据，再依次将【测试】`处理中→已完成`、需求`测试中→测试完成`、父【交付】活动态→`已完成`，并输出发布候选交接。
+满足后：`完成测试`先写入并回读证据，再将【测试】`处理中→已完成`、需求`测试中→测试完成`，并输出发布候选交接。
 
-**唯一完整写入口**：`scripts/transit_test_lifecycle.py complete ... --evidence-manifest <证据清单.json>`（先`--dry-run`，API `transit` + 三侧回读）。
+**唯一完整写入口**：`scripts/yunxiao_cli_test_lifecycle.py complete ... --evidence-manifest <证据清单.json>`（先预检，确认后加`--apply`，官方CLI写入 + 两侧回读）。
 **禁止**浏览器点「已完成」。
 
 `scripts/close_test_task.py`已停用并始终拒绝写入，防止绕过部署、QA清单或逐Bug复测门禁。
@@ -106,4 +106,4 @@ flowchart TB
 |---|---|
 | YunxiaoPM | 需求/交付/分析/设计/创建迭代；**不建【测试】** |
 | yunxiao-development-delivery | 建【开发】、提测建【测试】、缺陷→已修复\|暂不修复 |
-| **YunxiaoQA（本 Skill）** | 开始测试、记录证据、提缺陷、回归闭环、推进需求测试完成与父【交付】已完成、交接发布 |
+| **YunxiaoQA（本 Skill）** | 开始测试、记录证据、提缺陷、回归闭环、推进需求测试完成、交接发布 |
