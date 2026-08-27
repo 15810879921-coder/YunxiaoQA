@@ -2,13 +2,17 @@
 name: YunxiaoQA
 description: >-
   测试人员云效（Projex）自动化：接收并开始【测试】任务，推进需求待测试→测试中，
+  每日监测01_ONEOS新需求并为标题含【新增】且已选迭代的需求自动创建测试计划，
+  扫描全部可见用例库，匹配后通知确认再规划用例；
   从可核验测试证据清单记录计划、用例执行、报告和test部署证据，诊断查重后一键发起缺陷；
   独立建缺陷和测试用例建缺陷均强制将验证者设置为当前登录测试用户并回读，
   （本期交付绑定开发负责人 / 非本期自指定负责人），拉取已修复|暂不修复待验清单，
   仅在每个Bug具有独立复测通过证据后批量关闭已修复、再次打开复现缺陷、已关闭并入当期迭代；缺陷闭环且暂不修复均有批准证据后，
-  将【测试】标已完成、需求推进测试完成并输出正式发布候选交接。
+  将【测试】标已完成、需求推进测试完成并输出正式发布候选交接；用户明确确认人工验证通过时，
+  可走人工快捷闭环，使测试任务与正式关联需求进入完成态，但不冒充完整发布证据。
   用户说 YunxiaoQA、测试任务、拉取测试任务、发起缺陷、再次打开、批量关闭、并入迭代、
-  开始测试、记录测试证据、完成测试、闭环测试任务、接收发布回流、验证发布回流、交接发布 时使用。
+  开始测试、记录测试证据、完成测试、闭环测试任务、需求测试完成、监测新增需求、自动建测试计划、
+  接收发布回流、验证发布回流、交接发布 时使用。
   仅测试角色；不建【开发】/不创建迭代/不代开发改已修复。
   凡写云效先 Plan 确认再一口气 apply；禁止对齐 yunxiao-requirement-lifecycle。
 ---
@@ -21,7 +25,7 @@ description: >-
 
 与 **YunxiaoPM（需求任务）**、开发交付 Skill 分工：本 Skill **只做测试侧**读写。
 
-闭环版本：`2.6.1`。
+闭环版本：`2.7.3`。
 
 ## Plan 模式门禁（强制 · 凡写云效）
 
@@ -50,11 +54,14 @@ description: >-
 查重/复用 = 优先编号；禁止只按模糊标题瞎改他人单
 测试可改状态 = 已修复→已关闭 | 已修复→再次打开 |（闭环）【测试】→已完成
 测试阶段状态 = 【测试】待处理→处理中→已完成；需求待测试→测试中→测试完成
+人工快捷闭环 = 明确编号+用户确认人工验证通过；允许跳过部署/TestHub/manifest，但仍校验正式关系、活动缺陷和逐步回读；不产出发布候选
 测试不改     = 待确认/再次打开/处理中 → 已修复|暂不修复|处理中（开发侧）
 【测试】任务打开态 = 待处理 / 处理中（任务状态名，与缺陷待确认不同）
 产品不建迭代 = 本 Skill 只把已关闭缺陷挂到已有当期迭代；迭代按端分列，缺陷只并入与来源【交付】端侧标签一致的迭代
 交付端       = 【交付】端侧标签 Web / 小程序（PC 视为 Web）；Web 走test流水线证据，小程序按 testPipeline=skipped 跳过流水线与自动化测试
 发布候选真相 = 完成态【测试】+ 测试证据块 + 测试完成需求 + 正式关系
+新增需求建计划 = 每日一次；01_ONEOS；标题精确包含【新增】；同需求迭代；谢佳伟=管理员+参与人；当天至+14天；用例匹配后先通知确认
+测试计划状态 = 新建成功后→进行中（DOING）；计划内全部用例已执行（待测=0 且已执行=总数>0）后→已完成（DONE）；细则见 yunxiao-cli-testhub.md
 常量       = assets/runtime-ids.json（2026-07-27 01_ONEOS 已实网补齐）
 ```
 
@@ -67,8 +74,9 @@ description: >-
 | 缺陷描述模板 / 定位矩阵 | 本 Skill [references/bug-template.md](references/bug-template.md) · [references/diagnosis.md](references/diagnosis.md) |
 | 挂载点选【测试】/需求 | [references/anchor-selection.md](references/anchor-selection.md) · `scripts/list_bug_anchors.py` |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
-| 测试执行闭环 | [references/test-execution.md](references/test-execution.md) · `scripts/yunxiao_cli_test_lifecycle.py` · `scripts/yunxiao_cli_bug_retest.py` |
+| 测试执行闭环 | [references/test-execution.md](references/test-execution.md) · `scripts/yunxiao_cli_test_lifecycle.py` · `scripts/yunxiao_cli_bug_retest.py` · `scripts/yunxiao_cli_req_test_complete.py` |
 | TestHub计划/用例执行 | [references/yunxiao-cli-testhub.md](references/yunxiao-cli-testhub.md) · `scripts/yunxiao_cli_testhub.py` |
+| 新需求监测/自动建测试计划 | [references/requirement-testplan-monitor.md](references/requirement-testplan-monitor.md) · `scripts/yunxiao_requirement_plan_monitor.py` |
 | 列表/建缺/流转脚本 | [scripts/README.md](scripts/README.md) · `check_auth.py` / `list_bug_anchors.py` / `list_test_tasks.py` / `list_bugs.py` / `create_bug.py` / `transit_bug.py` / `close_test_task.py` |
 | 跨平台脚本启动 | [references/runtime-launcher.md](references/runtime-launcher.md) · `skill-run <script.py> [参数...]` |
 
@@ -85,9 +93,9 @@ description: >-
 历史事故：浏览器点状态菜单把 **ONEOS-343** 错关成 **ONEOS-309**。故：
 
 1. **禁止**用 `cursor-ide-browser` / DOM 点击 /「可交互节点」改云效状态、负责人、关联、迭代。
-2. **唯一常规写路径**：本 Skill `scripts/*.py`。TestHub 计划/用例/结果优先走官方阿里云 CLI；当前CLI与公开OpenAPI均缺少“规划已有用例”写能力时先返回`CLI_CAPABILITY_GAP`并零写入。只有用户在Plan中明确确认“指定测试计划+指定既有用例”的一次性页面补齐，才允许在隔离测试计划中执行该单一动作；随后必须立即回到CLI回读计划内用例并更新结果。该例外禁止改工作项状态、禁止猜测接口、禁止扩展到其他计划。
+2. **唯一常规写路径**：本 Skill `scripts/*.py`。TestHub 测试计划可由官方 OpenAPI 创建，用例与结果优先走官方阿里云 CLI/OpenAPI；当前官方能力仍缺少“规划已有用例”写接口，须先通知匹配结果并获得“指定测试计划+指定既有用例”的逐批确认。确认后仅允许在隔离测试计划页面补齐该单一动作；随后必须立即回到CLI回读计划内用例并更新结果。该例外禁止改工作项状态、禁止猜测接口、禁止扩展到其他计划。
 3. **编号硬门禁**：口令 `ONEOS-xx` → 脚本 `--sn` → `serialNumber ==` 精确匹配 → apply → **回读** `serialNumber|subject|from→to`；任一不对立刻停。
-4. **开始/记录/完成测试**：只用 `skill-run yunxiao_cli_test_lifecycle.py start|record|complete ...`；逐Bug复测关闭只用 `skill-run yunxiao_cli_bug_retest.py ...`。两者均通过官方阿里云 CLI 读取正式关系、校验部署证据与TestHub结果，先预检，再加`--apply`写证据与状态并回读。`skill-run` 按 [references/runtime-launcher.md](references/runtime-launcher.md) 解析。
+4. **开始/记录/完成测试**：只用 `skill-run yunxiao_cli_test_lifecycle.py start|record|complete|manual-complete ...`；逐Bug复测关闭只用 `skill-run yunxiao_cli_bug_retest.py ...`。常规`complete`校验部署证据与TestHub结果；`manual-complete`仅在用户针对明确编号确认人工验证通过后使用，跳过证据门禁但仍校验正式关系、无活动缺陷和写后回读，且不产出发布候选。`skill-run` 按 [references/runtime-launcher.md](references/runtime-launcher.md) 解析。
 5. **旧闭环入口**：`close_test_task.py`已停用并固定拒绝写入；`transit_test_lifecycle.py`保留为旧Cookie兼容实现但禁止用于新执行；`闭环测试任务`兼容口令必须转入`yunxiao_cli_test_lifecycle.py complete`完整门禁。
 6. Projex与TestHub新闭环只许PAT/组织ID/官方CLI。旧Cookie脚本只可用于历史诊断，**禁止**改走浏览器点选「凑合关单」。
 
@@ -96,6 +104,7 @@ description: >-
 | 场景 | 模块 |
 |---|---|
 | 口令面 | [references/commands.md](references/commands.md) |
+| 测试环境切账号 / 多角色 UI 验收 | [references/test-env-account-switch.md](references/test-env-account-switch.md) |
 | 开始测试 / 证据 / 完成测试 / 发布交接 | [references/test-execution.md](references/test-execution.md) |
 | 条线 1/2 · 状态机 · 再次打开 | [references/defect-flow.md](references/defect-flow.md) |
 | 诊断 · 查重 · 分层初判 | [references/diagnosis.md](references/diagnosis.md) |
@@ -104,11 +113,13 @@ description: >-
 | 挂载点选 | [references/anchor-selection.md](references/anchor-selection.md) |
 | 实写 API | [references/live-api.md](references/live-api.md) |
 | 跨平台脚本启动器 | [references/runtime-launcher.md](references/runtime-launcher.md) |
+| 每日监测需求并建测试计划 | [references/requirement-testplan-monitor.md](references/requirement-testplan-monitor.md) |
 
 ## 口令速查
 
 ```text
 拉取测试任务：状态=待处理|处理中；[项目=…]
+监测新增需求建计划：项目=01_ONEOS；标题标记=【新增】；频率=每日一次；管理员=谢佳伟；参与人=谢佳伟；用例库=全部可见；用例添加=匹配后通知确认
 开始测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]
 记录测试证据：测试任务=ONEOS-xx；证据清单=<JSON文件>
 发起缺陷：标题=…；描述=…；测试任务=ONEOS-xx；[需求=ONEOS-yy]；[负责人=…]；[证据=…]
@@ -120,12 +131,41 @@ description: >-
 再次打开：缺陷=ONEOS-xx；[原因=复现说明]；[证据=…]
 并入当期迭代：缺陷=… 或 范围=已关闭且未挂迭代；迭代=（当期/指定名）
 完成测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]；证据清单=<JSON文件>；[暂不修复批准=BUG-ID=批准人|证据]
+人工验证通过并完成：测试任务=ONEOS-xx；[需求=ONEOS-yy]
+需求测试完成：测试任务=ONEOS-xx；[需求=ONEOS-yy]
+# 【测试】已完成 + 验证通过 + 无缺陷单 → 需求测试中→测试完成（见「无缺陷回写需求」）
 接收发布回流：发版任务=TASK-900；触发=发布失败|产品验收失败；证据=ID或URL
 验证发布回流：发版任务=TASK-900；缺陷=ONEOS-a,ONEOS-b；回归证据清单=<JSON文件>
 闭环测试任务：测试任务=ONEOS-xx（兼容旧口令；按“完成测试”门禁执行）
 ```
 
 **编号优先**：口令显式 `ONEOS-xx` > 当前上下文 > 询问；**禁止按标题猜编号后静默写云效**。
+
+## 人工验证通过快捷闭环
+
+用户针对明确测试任务编号确认“人工验证通过”时，可使用独立的`manual-complete`路径：
+
+1. 写操作仍须 Plan，Plan 明确测试任务、正式关联需求和目标完成状态；执行参数必须含`--manual-verdict passed`。
+2. 精确回读【测试】、唯一父【交付】和唯一正式`ASSOCIATED`需求；任务源状态仅允许`待处理/处理中/已完成`，需求仅允许`待测试/测试中/测试完成`。
+3. 关联缺陷不得存在`待确认/处理中/已修复/再次打开`；只允许`已关闭/暂不修复`。
+4. 该路径不要求`oneos.test-deployment/v1`、TestHub或`oneos.qa-evidence/v1`，但必须按状态机补齐中间态并逐步回读：任务最终=`已完成`、需求最终=`测试完成`。
+5. 输出回执标记`evidenceMode=human-confirmed`及`releaseCandidateEligible=false`；不得把人工快捷闭环声称为完整发布候选证据。
+6. 只用：`skill-run yunxiao_cli_test_lifecycle.py manual-complete --space-id <项目ID> --test-sn ONEOS-xx [--req-sn ONEOS-yy] --manual-verdict passed --idempotency-key <键>`；预检成功且用户确认后加`--apply`。
+
+## 无缺陷回写需求（强制记住 · 2026-08-19）
+
+**规则原文口径：** 测试任务完成并且验证通过的（无缺陷单），把需求单状态改为测试完成。
+
+适用与门禁：
+
+1. 【测试】回读=`已完成`（编号硬门禁）。
+2. 验证结论为通过（任务评论或用户确认的测试结论；禁止无结论臆推）。
+3. 关联该【测试】的缺陷中，无`待确认/处理中/已修复/再次打开`；允许零缺陷，或仅有`已关闭`/`暂不修复`（暂不修复须另有批准证据，否则停）。
+4. 正式`ASSOCIATED`唯一反查需求（或口令`需求=`与关系一致）；需求当前=`测试中`。
+5. Plan 确认后推进需求`测试中→测试完成`并回读；回报一行：`serialNumber | subject | 测试中→测试完成`。
+6. **禁止**浏览器点状态；**禁止**在仍有活跃缺陷时改需求；**不**因此放宽完整`完成测试`的 TestHub/证据门禁——本口令是「测试任务已完成且无缺陷」后的需求回写捷径，与带完整证据清单的`完成测试`并列。
+
+用户说「评论结果并改状态」「测试通过无缺陷改需求」时：先保证【测试】已完成且评论结论，再按本规则改需求。
 
 ## 发起缺陷流水线（强制 · 方案 B）
 
@@ -147,7 +187,7 @@ description: >-
 
 ## 测试完成硬门禁
 
-执行`完成测试`前必须同时满足：
+执行常规`完成测试`前必须同时满足（人工验证通过快捷闭环按上一节独立门禁，不适用本节证据要求）：
 
 1. 【测试】=`处理中`且正式`TASK_SUB→【交付】`、`ASSOCIATED→需求`。
 2. 需求=`测试中`。
@@ -179,7 +219,11 @@ description: >-
 - [ ] 批量关闭：逐Bug复测证据已写入并回读；仅「已修复」→「已关闭」
 - [ ] 并入迭代：仅「已关闭」；迭代已存在（未新建）
 - [ ] 完成测试：test部署与QA证据清单已校验，证据块已写并回读；关联缺陷全部闭环；暂不修复均有批准证据
+- [ ] 人工快捷闭环：用户已针对明确编号确认人工验证通过；正式关系正确；无活动缺陷；任务与需求均完成并回读；回执明确不可作为发布候选
+- [ ] 无缺陷回写需求：【测试】已完成 + 验证通过 + 无活跃缺陷 → 需求测试中→测试完成并回读
 - [ ] 状态闭环：【测试】处理中→已完成；需求测试中→测试完成；两侧均回读
 - [ ] 发布交接：项目/迭代/需求/交付/测试证据/幂等键完整
+- [ ] 新增需求监测：每日一次；仅标题含【新增】；项目/人员/迭代均实时回读；计划当天至+14天；按需求ID幂等；匹配用例未自动添加
+- [ ] 测试计划状态：新建后回读「进行中」(DOING)；全部用例已执行（待测=0）后回读「已完成」(DONE)；零用例不得 DONE
 - [ ] 每次写操作回报含一行：`serialNumber | subject | from→to`（与口令编号一致）
 - [ ] 本轮无浏览器改状态；无建【开发】、无创建迭代、无代开发改状态

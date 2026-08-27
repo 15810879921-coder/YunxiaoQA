@@ -48,9 +48,10 @@
 skill-run yunxiao_cli_test_lifecycle.py start `
   --space-id <项目ID> `
   --test-sn ONEOS-xx `
-  --req-sn ONEOS-yy `
   --idempotency-key 'qa-start-ONEOS-xx'
 ```
+
+`--req-sn`可省略：适配器会从正式`ASSOCIATED`关系唯一反查需求；若显式提供，则必须与正式关系一致。若开发已提供可核验的部署JSON、但任务描述缺少受管`oneos.test-deployment/v1`区块，可在同一预检与已确认Plan中增加`--deployment-evidence <JSON路径>`，先校验并修复区块，再幂等推进状态。
 
 5. 回读两侧编号、标题和状态。任一失败时报告部分状态，不用浏览器补写。
 
@@ -117,6 +118,100 @@ skill-run yunxiao_cli_test_lifecycle.py complete `
 - TestHub计划概览必须是`/testhub/plan/<计划ID>/dashboard`，作为同一计划的正式汇总报告；脚本同时回读计划计数和目标用例执行ID，禁止只信URL。
 
 完成后回读【测试】=`已完成`和需求=`测试完成`。
+
+## 人工验证通过快捷闭环
+
+适用：用户针对明确测试任务编号确认人工验证通过，并要求测试任务、需求直接闭环；不把该确认伪装成部署、TestHub或QA manifest证据。
+
+前置与边界：
+
+- 【测试】状态属于`待处理/处理中/已完成`，正式关联需求属于`待测试/测试中/测试完成`。
+- 唯一父项必须为【交付】，正式`ASSOCIATED`需求必须唯一且与口令一致。
+- 关联缺陷不得有`待确认/处理中/已修复/再次打开`；只允许`已关闭/暂不修复`。
+- 免除`oneos.test-deployment/v1`、TestHub和`oneos.qa-evidence/v1`，但不生成正式发布候选交接。
+- 写入前仍走Plan确认；参数`--manual-verdict passed`只表示Agent已收到本次明确人工通过确认，不能自行推断。
+
+脚本入口：
+
+```powershell
+skill-run yunxiao_cli_test_lifecycle.py manual-complete `
+  --space-id <项目ID> `
+  --test-sn ONEOS-xx `
+  --req-sn ONEOS-yy `
+  --manual-verdict passed `
+  --idempotency-key 'qa-manual-ONEOS-xx-<日期>'
+```
+
+先预检，确认后加`--apply`。脚本按需顺序补齐：
+
+1. 【测试】`待处理→处理中`。
+2. 需求`待测试→测试中`。
+3. 【测试】`处理中→已完成`。
+4. 需求`测试中→测试完成`。
+
+每一步均回读编号和状态。最终回执固定包含`evidenceMode=human-confirmed`与`releaseCandidateEligible=false`。
+
+## 无缺陷回写需求（捷径）
+
+```text
+/skill YunxiaoQA
+需求测试完成：测试任务=ONEOS-xx；[需求=ONEOS-yy]
+```
+
+**记住：** 测试任务完成并且验证通过的（无缺陷单），把需求单状态改为测试完成。
+
+执行顺序：
+
+1. 回读【测试】=`已完成`、正式`ASSOCIATED→需求`（口令需求须一致）。
+2. 确认验证通过（任务评论测试结论或用户明确确认）。
+3. 扫描关联缺陷：无`待确认/处理中/已修复/再次打开`；零缺陷视为满足。
+4. 需求当前=`测试中`时，Plan 确认后推进`测试完成`并回读。
+5. 回报：`需求编号 | 标题 | 测试中→测试完成`。
+
+不得用「测试任务已完成」 alone 推断需求已测试完成；必须过本门禁后再写。有活跃缺陷时停，走缺陷闭环后再执行。
+
+脚本入口（2026-08-19 补录）：
+
+```powershell
+skill-run yunxiao_cli_req_test_complete.py `
+  --space-id <项目ID> `
+  --test-sn ONEOS-xx `
+  --req-sn ONEOS-yy `
+  --test-plan-id <计划ID>
+```
+
+确认后加 `--apply`。可选 `--test-plan-id` 将 TestHub 计划进度写入回执，便于追溯「计划内已执行用例」。
+
+## 计划内执行用例 + 需求测试完成（常见组合）
+
+适用：测试计划已规划用例；【测试】可能已是「已完成」；需求仍「测试中」；无活跃缺陷。
+
+1. 逐条执行计划内用例（先预检，确认后 `--apply --status PASS`）：
+
+```powershell
+skill-run yunxiao_cli_testhub.py `
+  --test-plan-id <计划ID> `
+  --test-repo-id <用例库ID> `
+  --testcase-id <用例内部ID> `
+  --executor-id <执行人userId> `
+  --status PASS `
+  --apply
+```
+
+2. 回读计划进度：`test-hub-get-test-plan-progress-rate` 须 `todoCount=0` 且已执行=总数>0；满足后将 **测试计划** 状态改为「已完成」（`DONE`）并回读（见 [yunxiao-cli-testhub.md](yunxiao-cli-testhub.md) 状态机）。用例结果是否全 PASS 与计划 DONE 解耦：有 FAILURE/POSTPONE 只要已执行完仍可 DONE，缺陷另走缺陷条线。
+
+3. 需求回写（本场景用「需求测试完成」，非完整「完成测试」）：
+
+```powershell
+skill-run yunxiao_cli_req_test_complete.py `
+  --space-id <项目ID> `
+  --test-sn ONEOS-xx `
+  --req-sn ONEOS-yy `
+  --test-plan-id <计划ID> `
+  --apply
+```
+
+完整「完成测试」仍须 `oneos.test-deployment/v1` + `oneos.qa-evidence/v1` 证据清单；缺部署区块时不得硬走 complete。
 
 ## 发布候选交接
 

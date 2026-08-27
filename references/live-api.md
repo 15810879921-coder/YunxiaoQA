@@ -80,6 +80,17 @@ skill-run create_bug.py --mode 本期 --source test-case --test-case CASE-1001 `
   --title '…' --test-task DEMO-xx --assignee 沈辰 --description-html '<p>…</p>'
 ```
 
+机器已配置个人访问令牌时，非本期独立缺陷可走官方 OpenAPI：
+
+```powershell
+skill-run create_bug_openapi.py --title '【模块】问题' --assignee 张三 `
+  --verifier 当前测试用户 --label 小程序-模块 --priority 中 --severity 3-一般 `
+  --description-file C:\evidence\bug.html --file C:\evidence\shot.png --dry-run
+```
+
+该路径读取机器/进程环境变量，不落盘 Token；apply 前做精确标题查重，apply 后回读
+创建人=验证者、负责人、标签、优先级、严重程度和附件名称+大小。
+
 ```http
 POST|PUT /projex/api/workitem/workitem?_input_charset=utf-8
 ```

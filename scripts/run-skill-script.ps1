@@ -22,6 +22,33 @@ if (-not (Test-Path -LiteralPath $targetScript -PathType Leaf)) {
     exit 66
 }
 
+# Codex/Cursor may stay open while Windows environment variables are added or
+# rotated. Import only the Yunxiao allowlist into this child process when the
+# current process did not inherit a value. Never print or persist the values.
+function Import-MissingEnvironmentVariable {
+    param([Parameter(Mandatory = $true)][string]$Name)
+
+    $current = [Environment]::GetEnvironmentVariable($Name, 'Process')
+    if (-not [string]::IsNullOrWhiteSpace($current)) { return }
+    foreach ($scope in @('User', 'Machine')) {
+        $candidate = [Environment]::GetEnvironmentVariable($Name, $scope)
+        if (-not [string]::IsNullOrWhiteSpace($candidate)) {
+            [Environment]::SetEnvironmentVariable($Name, $candidate, 'Process')
+            return
+        }
+    }
+}
+
+foreach ($environmentName in @(
+    'ALIBABA_CLOUD_YUNXIAO_ACCESS_TOKEN',
+    'ALIBABA_CLOUD_YUNXIAO_ORGANIZATION_ID',
+    'ALIBABA_CLOUD_YUNXIAO_API_BASE_URL',
+    'ALIBABA_CLOUD_YUNXIAO_ENDPOINT',
+    'ALIYUN_CLI_PATH'
+)) {
+    Import-MissingEnvironmentVariable -Name $environmentName
+}
+
 $pythonCandidates = @(
     @{ Name = 'py'; Arguments = @('-3') },
     @{ Name = 'python'; Arguments = @() },
@@ -47,6 +74,8 @@ if ($null -eq $pythonCommand) {
 }
 
 $env:PYTHONDONTWRITEBYTECODE = '1'
+$env:PYTHONUTF8 = '1'
+$env:PYTHONIOENCODING = 'utf-8'
 $env:ONEOS_YUNXIAO_TEMP_DIR = Join-Path -Path ([IO.Path]::GetTempPath()) -ChildPath 'oneos-yunxiao'
 New-Item -ItemType Directory -Path $env:ONEOS_YUNXIAO_TEMP_DIR -Force | Out-Null
 

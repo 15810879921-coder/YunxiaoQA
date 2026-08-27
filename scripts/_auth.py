@@ -11,7 +11,7 @@ from typing import Any
 import requests
 
 ROOT = Path(__file__).resolve().parents[1]
-RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text())
+RUNTIME = json.loads((ROOT / "assets" / "runtime-ids.json").read_text(encoding="utf-8"))
 SPACE = (
     (RUNTIME.get("project") or {}).get("last_selected") or {}
 ).get("spaceIdentifier") or "1280be963a5a2cc126a4118dca"

@@ -49,6 +49,10 @@ SKIP_PIPELINE_ENDS = {"小程序"}
 BUG_RETEST_START = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_START -->"
 BUG_RETEST_END = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_END -->"
 BUG_RETEST_SCHEMA = "oneos.bug-retest/v1"
+ACTION_STATES = {
+    "start": ("待处理", "处理中", "待测试", "测试中"),
+    "complete": ("处理中", "已完成", "测试中", "测试完成"),
+}
 
 
 def same_serial(left: object, right: object) -> bool:
@@ -149,16 +153,22 @@ def transition_plan(
     item: dict[str, Any],
     expected_from: str,
     target: str,
-) -> dict[str, str]:
+) -> dict[str, Any]:
     meta = brief_item(item)
     name, identifier = current_status(item)
-    if name != expected_from:
+    if name == target:
+        target_id = identifier
+        already_done = True
+    elif name != expected_from:
         raise RuntimeError(
-            f"{meta.get('serialNumber')} 当前状态「{name}」，期望「{expected_from}」"
+            f"{meta.get('serialNumber')} 当前状态「{name}」，期望源状态"
+            f"「{expected_from}」或目标状态「{target}」"
         )
-    target_id = resolve_next_status_id(
-        s, str(meta["id"]), identifier, target
-    )
+    else:
+        target_id = resolve_next_status_id(
+            s, str(meta["id"]), identifier, target
+        )
+        already_done = False
     return {
         "id": str(meta["id"]),
         "serialNumber": str(meta.get("serialNumber") or ""),
@@ -167,7 +177,22 @@ def transition_plan(
         "fromId": identifier,
         "to": target,
         "toId": target_id,
+        "alreadyDone": already_done,
     }
+
+
+def build_transition_plans(
+    s,
+    action: str,
+    test: dict[str, Any],
+    req: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """按测试任务→需求的固定顺序生成状态计划；不推进父【交付】。"""
+    test_from, test_to, req_from, req_to = ACTION_STATES[action]
+    return [
+        transition_plan(s, test, test_from, test_to),
+        transition_plan(s, req, req_from, req_to),
+    ]
 
 
 def collect_bugs(
@@ -611,11 +636,7 @@ def main() -> None:
             print(json.dumps(record_output | {"dryRun": False}, ensure_ascii=False, indent=2))
             return
 
-        action_states = {
-            "start": ("待处理", "处理中", "待测试", "测试中"),
-            "complete": ("处理中", "已完成", "测试中", "测试完成"),
-        }
-        test_from, test_to, req_from, req_to = action_states[args.action]
+        test_from, test_to, req_from, req_to = ACTION_STATES[args.action]
 
         if test_meta.get("status") == test_to and req_meta.get("status") == req_to:
             print(
@@ -632,8 +653,7 @@ def main() -> None:
             )
             return
 
-        test_plan = transition_plan(s, test, test_from, test_to)
-        req_plan = transition_plan(s, req, req_from, req_to)
+        test_plan, req_plan = build_transition_plans(s, args.action, test, req)
         output: dict[str, Any] = {
             "ok": True,
             "dryRun": args.dry_run,
@@ -736,20 +756,22 @@ def main() -> None:
             if BLOCK_START not in reread_document or BLOCK_END not in reread_document:
                 raise RuntimeError("测试证据写入后回读失败；状态尚未推进")
 
-        transit(
-            s,
-            test_plan["id"],
-            test_plan["fromId"],
-            test_plan["toId"],
-        )
-        test_after = readback(s, test_plan)
-        try:
+        if not test_plan["alreadyDone"]:
             transit(
                 s,
-                req_plan["id"],
-                req_plan["fromId"],
-                req_plan["toId"],
+                test_plan["id"],
+                test_plan["fromId"],
+                test_plan["toId"],
             )
+        test_after = readback(s, test_plan)
+        try:
+            if not req_plan["alreadyDone"]:
+                transit(
+                    s,
+                    req_plan["id"],
+                    req_plan["fromId"],
+                    req_plan["toId"],
+                )
             req_after = readback(s, req_plan)
         except Exception as error:
             raise RuntimeError(

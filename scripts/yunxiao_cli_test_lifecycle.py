@@ -1,5 +1,10 @@
 #!/usr/bin/env python3
-"""Record and complete Yunxiao QA lifecycle through the official devops CLI."""
+"""Record and complete Yunxiao QA lifecycle through the official devops CLI.
+
+``manual-complete`` is an explicit human-verdict shortcut.  It closes the test
+task and its formally associated requirement without claiming release-grade QA
+evidence, while retaining relation, defect-state, exact-ID, and readback gates.
+"""
 
 from __future__ import annotations
 
@@ -28,6 +33,10 @@ DEPLOY_END = "<!-- ONEOS_TEST_DEPLOYMENT_EVIDENCE_END -->"
 BUG_RETEST_START = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_START -->"
 BUG_RETEST_END = "<!-- YUNXIAOQA_BUG_RETEST_EVIDENCE_END -->"
 BUG_RETEST_SCHEMA = "oneos.bug-retest/v1"
+MANUAL_VERDICT = "passed"
+MANUAL_TEST_ALLOWED = {"待处理", "处理中", "已完成"}
+MANUAL_REQ_ALLOWED = {"待测试", "测试中", "测试完成"}
+MANUAL_BUG_CLOSED = {"已关闭", "暂不修复"}
 
 
 def rows(value: Any, label: str) -> list[dict[str, Any]]:
@@ -74,6 +83,26 @@ def exact_workitem(executable: str, project_id: str, category: str,
     if str(item.get("serialNumber") or "").upper() != serial_number.upper():
         raise core.AdapterError(f"{serial_number}编号回读不一致。")
     return item
+
+
+def resolve_requirement(executable: str, project_id: str,
+                        associated_ids: list[str],
+                        serial_number: str | None = None) -> dict[str, Any]:
+    if serial_number:
+        requirement = exact_workitem(executable, project_id, "Req", serial_number)
+        if str(requirement.get("id") or "") not in associated_ids:
+            raise core.AdapterError(
+                f"口令需求{serial_number}不是测试任务的正式ASSOCIATED需求。"
+            )
+        return requirement
+    candidates = [row for row in search_workitems(executable, project_id, "Req")
+                  if str(row.get("id") or "") in associated_ids]
+    candidate_ids = {str(row.get("id") or "") for row in candidates if row.get("id")}
+    if len(candidate_ids) != 1:
+        raise core.AdapterError(
+            f"测试任务无法唯一反查正式ASSOCIATED需求：匹配到{len(candidate_ids)}个。"
+        )
+    return get_workitem(executable, next(iter(candidate_ids)))
 
 
 def status_name(item: dict[str, Any]) -> str:
@@ -175,6 +204,15 @@ def validate_deployment(test: dict[str, Any], req: dict[str, Any],
                         project_id: str) -> dict[str, Any]:
     value = parse_json_block(str(test.get("description") or ""),
                              DEPLOY_START, DEPLOY_END)
+    return validate_deployment_payload(value, test, req, project_id)
+
+
+def load_deployment_repair(path_value: str, test: dict[str, Any],
+                           req: dict[str, Any], project_id: str) -> dict[str, Any]:
+    path = Path(path_value).resolve()
+    value = json.loads(path.read_text(encoding="utf-8"))
+    if not isinstance(value, dict):
+        raise core.AdapterError("部署证据修复文件必须是JSON对象。")
     return validate_deployment_payload(value, test, req, project_id)
 
 
@@ -395,32 +433,193 @@ def update_item(executable: str, workitem_id: str,
     return get_workitem(executable, workitem_id)
 
 
+def update_status_checked(executable: str, project_id: str,
+                          item: dict[str, Any], target_name: str) -> dict[str, Any]:
+    """Update one status and immediately verify the exact serial and target."""
+    expected_sn = str(item.get("serialNumber") or "")
+    updated = update_item(executable, str(item["id"]), {
+        "status": status_id(executable, project_id, item, target_name),
+    })
+    if str(updated.get("serialNumber") or "").upper() != expected_sn.upper() or \
+            status_name(updated) != target_name:
+        raise core.AdapterError(
+            f"状态写入后回读失败：期望{expected_sn}|{target_name}，"
+            f"实际{item_snapshot(updated)}"
+        )
+    return updated
+
+
 def run(args: argparse.Namespace) -> int:
     executable = core.find_aliyun()
     auth = core.require_auth_env()
     test = exact_workitem(executable, args.space_id, "Task", args.test_sn)
-    req = exact_workitem(executable, args.space_id, "Req", args.req_sn)
-    before = {"test": item_snapshot(test), "requirement": item_snapshot(req)}
     parents = relation_ids(executable, str(test["id"]), "PARENT")
     associated = relation_ids(executable, str(test["id"]), "ASSOCIATED")
+    req = resolve_requirement(executable, args.space_id, associated, args.req_sn)
+    args.req_sn = str(req.get("serialNumber") or "")
+    before = {"test": item_snapshot(test), "requirement": item_snapshot(req)}
     if len(parents) != 1 or str(req["id"]) not in associated:
         raise core.AdapterError("测试任务正式PARENT/ASSOCIATED关系不完整。")
+    parent = get_workitem(executable, parents[0])
+    if not str(parent.get("subject") or "").startswith("【交付】"):
+        raise core.AdapterError("测试任务唯一父项不是【交付】任务。")
+    if args.command == "manual-complete":
+        if args.manual_verdict != MANUAL_VERDICT:
+            raise core.AdapterError(
+                "人工快捷闭环必须在用户明确确认人工验证通过后传"
+                "--manual-verdict passed。"
+            )
+        if status_name(test) not in MANUAL_TEST_ALLOWED or \
+                status_name(req) not in MANUAL_REQ_ALLOWED:
+            raise core.AdapterError(f"人工快捷闭环状态门禁失败：{before}")
+        bugs = collect_bugs(
+            executable, args.space_id, str(test["id"]), "", match_version=False,
+        )
+        active = [bug for bug in bugs if bug["status"] not in MANUAL_BUG_CLOSED]
+        if active:
+            raise core.AdapterError(json.dumps({
+                "error": "manual_complete_has_active_bugs",
+                "activeBugs": active,
+                "hint": "人工验证通过不能覆盖活动缺陷；请先闭环缺陷。",
+            }, ensure_ascii=False))
+
+        actions: list[dict[str, Any]] = []
+        if status_name(test) == "待处理":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.test_sn,
+                "status": "处理中",
+            })
+        if status_name(req) == "待测试":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.req_sn,
+                "status": "测试中",
+            })
+        if status_name(test) != "已完成":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.test_sn,
+                "status": "已完成",
+            })
+        if status_name(req) != "测试完成":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.req_sn,
+                "status": "测试完成",
+            })
+
+        receipt: dict[str, Any] = {
+            "schemaVersion": SCHEMA,
+            "mode": "apply" if args.apply else "preflight",
+            "command": "manual-complete",
+            "evidenceMode": "human-confirmed",
+            "manualVerdict": MANUAL_VERDICT,
+            "releaseCandidateEligible": False,
+            "organizationId": auth["organizationId"],
+            "projectId": args.space_id,
+            "before": before,
+            "relations": {
+                "parentIds": parents,
+                "parent": item_snapshot(parent),
+                "associatedIds": associated,
+            },
+            "bugs": bugs,
+            "plannedActions": actions,
+            "verified": False,
+        }
+        if args.apply:
+            if status_name(test) == "待处理":
+                test = update_status_checked(
+                    executable, args.space_id, test, "处理中",
+                )
+            if status_name(req) == "待测试":
+                req = update_status_checked(
+                    executable, args.space_id, req, "测试中",
+                )
+            if status_name(test) != "已完成":
+                test = update_status_checked(
+                    executable, args.space_id, test, "已完成",
+                )
+            if status_name(req) != "测试完成":
+                req = update_status_checked(
+                    executable, args.space_id, req, "测试完成",
+                )
+            receipt["after"] = {
+                "test": item_snapshot(test),
+                "requirement": item_snapshot(req),
+            }
+            receipt["verified"] = status_name(test) == "已完成" and \
+                status_name(req) == "测试完成"
+            if not receipt["verified"]:
+                raise core.AdapterError("人工快捷闭环状态写入后回读失败。")
+        target = Path(args.output) if args.output else core.output_dir() / \
+            f"qa-lifecycle-{args.test_sn.lower()}-manual-complete.json"
+        core.write_json(target, receipt)
+        print(json.dumps({
+            "mode": receipt["mode"],
+            "command": "manual-complete",
+            "testTask": receipt.get("after", before)["test"],
+            "requirement": receipt.get("after", before)["requirement"],
+            "bugs": len(bugs),
+            "releaseCandidateEligible": False,
+            "verified": receipt["verified"],
+            "receipt": str(target),
+        }, ensure_ascii=False, indent=2))
+        return 0
     if args.command == "start":
         if status_name(test) not in {"待处理", "处理中"} or \
                 status_name(req) not in {"待测试", "测试中"}:
             raise core.AdapterError(f"开始测试状态门禁失败：{before}")
-        actions = [
-            {"operation": "projex-update-workitem", "target": args.test_sn,
-             "status": "处理中"},
-            {"operation": "projex-update-workitem", "target": args.req_sn,
-             "status": "测试中"},
-        ]
+        repair_needed = False
+        if args.deployment_evidence:
+            deployment_repair = load_deployment_repair(
+                args.deployment_evidence, test, req, args.space_id,
+            )
+            repaired_description = replace_deployment_block(
+                str(test.get("description") or ""), deployment_block(deployment_repair)
+            )
+            repair_needed = repaired_description != str(test.get("description") or "")
+            if repair_needed and args.apply:
+                test = update_item(executable, str(test["id"]), {
+                    "description": repaired_description,
+                    "formatType": str(test.get("formatType") or "MARKDOWN"),
+                })
+            elif repair_needed:
+                test = {**test, "description": repaired_description}
+        try:
+            deployment = validate_deployment(test, req, args.space_id)
+        except (core.AdapterError, ValueError, json.JSONDecodeError) as exc:
+            raise core.AdapterError(
+                "开始测试部署证据门禁失败："
+                f"test={before['test']}；requirement={before['requirement']}；"
+                f"parent={item_snapshot(parent)}；{exc}"
+            ) from exc
+        actions = []
+        if repair_needed:
+            actions.append({
+                "operation": "projex-update-workitem",
+                "target": args.test_sn,
+                "field": "description.oneos.test-deployment/v1",
+                "source": str(Path(args.deployment_evidence).resolve()),
+            })
+        if status_name(test) != "处理中":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.test_sn,
+                "status": "处理中",
+            })
+        if status_name(req) != "测试中":
+            actions.append({
+                "operation": "projex-update-workitem", "target": args.req_sn,
+                "status": "测试中",
+            })
         receipt: dict[str, Any] = {
             "schemaVersion": SCHEMA,
             "mode": "apply" if args.apply else "preflight",
             "command": "start", "organizationId": auth["organizationId"],
             "projectId": args.space_id, "before": before,
-            "relations": {"parentIds": parents, "associatedIds": associated},
+            "relations": {
+                "parentIds": parents,
+                "parent": item_snapshot(parent),
+                "associatedIds": associated,
+            },
+            "deployment": deployment,
             "plannedActions": actions, "verified": False,
         }
         if args.apply:
@@ -456,12 +655,8 @@ def run(args: argparse.Namespace) -> int:
         raise core.AdapterError("record/complete必须提供--evidence-manifest。")
     deployment_repair = None
     if args.deployment_evidence:
-        path = Path(args.deployment_evidence).resolve()
-        deployment_repair = json.loads(path.read_text(encoding="utf-8"))
-        if not isinstance(deployment_repair, dict):
-            raise core.AdapterError("部署证据修复文件必须是JSON对象。")
-        deployment_repair = validate_deployment_payload(
-            deployment_repair, test, req, args.space_id,
+        deployment_repair = load_deployment_repair(
+            args.deployment_evidence, test, req, args.space_id,
         )
         repaired_description = replace_deployment_block(
             str(test.get("description") or ""), deployment_block(deployment_repair)
@@ -593,13 +788,16 @@ def run(args: argparse.Namespace) -> int:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("start", "record", "complete"))
+    parser.add_argument(
+        "command", choices=("start", "record", "complete", "manual-complete")
+    )
     parser.add_argument("--space-id", required=True)
     parser.add_argument("--test-sn", required=True)
-    parser.add_argument("--req-sn", required=True)
+    parser.add_argument("--req-sn")
     parser.add_argument("--evidence-manifest")
     parser.add_argument("--deployment-evidence")
     parser.add_argument("--risk-approval", action="append", default=[])
+    parser.add_argument("--manual-verdict", choices=(MANUAL_VERDICT,))
     parser.add_argument("--idempotency-key", required=True)
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--output")

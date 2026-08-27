@@ -35,6 +35,7 @@ from _auth import (  # noqa: E402
     get_workitem,
     get_workitem_extra,
     list_associated,
+    post_list,
     resolve_person,
     resolve_req_from_test,
     session,
@@ -44,8 +45,19 @@ from _auth import (  # noqa: E402
 )
 
 BUG_TYPE = RUNTIME["workitem_types"]["bug"]["identifier"]
-PRI = RUNTIME["fields"]["priority"]
-SEV = RUNTIME["fields"]["seriousLevel"]
+
+
+def enum_options(field: dict) -> dict[str, str]:
+    """剔除运行时字段元数据，只保留可选显示名→identifier。"""
+    return {
+        str(name): str(identifier)
+        for name, identifier in field.items()
+        if name not in {"fieldIdentifier", "name"} and isinstance(identifier, str)
+    }
+
+
+PRI = enum_options(RUNTIME["fields"]["priority"])
+SEV = enum_options(RUNTIME["fields"]["seriousLevel"])
 
 
 def resolve_target(
@@ -87,6 +99,53 @@ def relation_hit(items: list[dict], target_id: str) -> bool:
 def has_associated(s, a_id: str, b_id: str) -> bool:
     both = list_associated(s, a_id, forward=True) + list_associated(s, a_id, forward=False)
     return relation_hit(both, b_id)
+
+
+def find_exact_title_duplicates(s, space: str, title: str) -> list[dict]:
+    """用 CONTAINS 缩小范围，再以标题完全一致判定重复缺陷。"""
+    data = post_list(
+        s,
+        space=space,
+        category="Bug",
+        conditions=[
+            [
+                {
+                    "className": "string",
+                    "fieldIdentifier": "subject",
+                    "format": "input",
+                    "operator": "CONTAINS",
+                    "value": [title],
+                }
+            ]
+        ],
+    )
+    items = data.get("result") or []
+    return [
+        brief_item(item)
+        for item in items
+        if (item.get("subject") or "").strip() == title.strip()
+    ]
+
+
+def tag_ids(value: object) -> set[str]:
+    """兼容云效 tag 字段的对象、列表和嵌套响应形态。"""
+    hits: set[str] = set()
+    if isinstance(value, list):
+        for item in value:
+            hits.update(tag_ids(item))
+        return hits
+    if isinstance(value, dict):
+        for key in ("identifier", "id", "value"):
+            item = value.get(key)
+            if isinstance(item, str) and item.strip():
+                hits.add(item.strip())
+        for item in value.values():
+            if isinstance(item, (dict, list)):
+                hits.update(tag_ids(item))
+        return hits
+    if isinstance(value, str) and value.strip():
+        hits.add(value.strip())
+    return hits
 
 
 def append_req_trace(html: str, req_meta: dict) -> str:
@@ -216,6 +275,8 @@ def main() -> None:
     ap.add_argument("--req-id", default=None)
     ap.add_argument("--description-html", default=None)
     ap.add_argument("--description-file", default=None)
+    ap.add_argument("--tag-id", default=None, help="标签 identifier；必须来自云效实时解析")
+    ap.add_argument("--tag-name", default=None, help="仅用于 Plan 展示和回读说明")
     ap.add_argument("--space", default=None)
     ap.add_argument("--dry-run", action="store_true")
     ap.add_argument(
@@ -231,6 +292,8 @@ def main() -> None:
         args.source = "test-case"
     if args.source == "test-case" and not args.test_case:
         raise SystemExit("测试用例创建路径必须提供 --test-case")
+    if args.tag_name and not args.tag_id:
+        raise SystemExit("提供 --tag-name 时必须同时提供 --tag-id")
 
     html = args.description_html
     if args.description_file:
@@ -286,6 +349,8 @@ def main() -> None:
     if args.test_case:
         html = append_test_case_trace(html, args.test_case)
 
+    duplicates = find_exact_title_duplicates(s, space, args.title)
+
     payload: dict = {
         "subject": args.title,
         "description": html,
@@ -314,6 +379,8 @@ def main() -> None:
             "relatedWorkitemIdentifier": test_meta["id"],
             "relatedToRelationIdentifier": "ASSOCIATED",
         }
+    if args.tag_id:
+        payload["tag"] = [args.tag_id]
 
     plan = {
         "mode": args.mode,
@@ -329,6 +396,8 @@ def main() -> None:
         },
         "priority": args.priority,
         "severity": args.severity,
+        "tag": {"id": args.tag_id, "name": args.tag_name} if args.tag_id else None,
+        "exactTitleDuplicates": duplicates,
         "testAssociated": test_meta,
         "reqTrace": req_meta,
         "relationRule": "ASSOCIATED→【测试】；需求仅描述追溯（不做 API 第二挂）",
@@ -338,6 +407,20 @@ def main() -> None:
     if args.dry_run:
         print(json.dumps({"ok": True, "wouldCreate": plan}, ensure_ascii=False, indent=2))
         return
+    if duplicates:
+        print(
+            json.dumps(
+                {
+                    "ok": False,
+                    "error": "发现标题完全一致的已有缺陷，已阻止重复创建",
+                    "duplicates": duplicates,
+                    "plan": plan,
+                },
+                ensure_ascii=False,
+                indent=2,
+            )
+        )
+        raise SystemExit(5)
 
     created = create_workitem(s, payload)
     bug_id = created["identifier"]
@@ -377,14 +460,17 @@ def main() -> None:
                 "请删单重试；create 须在 createWorkitemRelationInfo 挂 ASSOCIATED。"
             )
 
-    live = brief_item(get_workitem(s, bug_id))
+    full_live = get_workitem(s, bug_id)
+    live = brief_item(full_live)
+    live_tag_ids = tag_ids(full_live.get("tag"))
+    tag_ok = not args.tag_id or args.tag_id in live_tag_ids
     assoc_ids = [
         x.get("serialNumber") or x.get("identifier")
         for x in list_associated(s, bug_id, forward=True)
         + list_associated(s, bug_id, forward=False)
     ]
 
-    ok = verifier_ok and (test_ok if test_meta else True)
+    ok = verifier_ok and (test_ok if test_meta else True) and tag_ok
     out = {
         "ok": ok,
         "bug": live,
@@ -399,6 +485,8 @@ def main() -> None:
         },
         "testAssociatedOk": test_ok if test_meta else None,
         "testAssociatedError": test_error,
+        "tagOk": tag_ok if args.tag_id else None,
+        "tagReadBack": sorted(live_tag_ids),
         "reqTrace": req_meta,
         "associated": assoc_ids,
         "note": "硬门禁：ASSOCIATED→【测试】；需求写入描述追溯，不做 ASSOCIATED API",
@@ -406,8 +494,10 @@ def main() -> None:
     print(json.dumps(out, ensure_ascii=False, indent=2))
     if not verifier_ok:
         raise SystemExit(4)
-    if not ok:
+    if test_meta and not test_ok:
         raise SystemExit(3)
+    if not tag_ok:
+        raise SystemExit(6)
 
 
 if __name__ == "__main__":
