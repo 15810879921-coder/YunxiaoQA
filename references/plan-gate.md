@@ -46,23 +46,20 @@
 
 - [ ] 【测试】=`待处理`、需求=`待测试`
 - [ ] 【测试】唯一父【交付】、正式关联需求与口令一致
-- [ ] 已回读`oneos.test-deployment/v1`的`deliveryEnd`（`Web` / `小程序`；`PC`视为`Web`）
-- [ ] **Web**：环境=test、终态成功，项目/迭代/需求/测试任务均精确一致，且包含待测版本和执行证据
-- [ ] **小程序**：`testPipeline=skipped`、`status=skipped`、含`reason`，项目/迭代/需求/测试任务精确一致；已声明按规则跳过test流水线与自动化测试
+- [ ] 已回读唯一父【交付】及其端别/迭代；缺迭代时先按候选确认流程补绑
+- [ ] 不以test部署记录、执行ID或实际版本作为开始测试门禁
 - [ ] dry-run显示两侧下一状态均唯一可达
 
 ## 完成测试
 
 - [ ] 【测试】=`处理中`、需求=`测试中`
-- [ ] 已提供真实JSON证据清单文件，schema=`oneos.qa-evidence/v1`；不接受口令逐项自报
-- [ ] 清单中的项目、迭代、需求、测试任务、部署执行与待测版本均和云效受管证据精确一致（**小程序**：`testDeployment`写`deliveryEnd=小程序`+`testPipeline=skipped`，不比对执行ID/部署版本/证据URL）
-- [ ] 测试计划、用例执行、测试报告都有非空ID和可访问URL；未执行/失败/阻塞用例均为0
+- [ ] 已提供明确的TestHub计划ID并由官方CLI直接回读；计划用例总数>0，未执行/失败/阻塞均为0
 - [ ] 用例已由`yunxiao_cli_testhub.py`规划进计划并通过官方CLI回读；不得把用例库中的孤立用例当成计划执行结果
 - [ ] 关联缺陷清单；活跃缺陷为0
-- [ ] 每条已关闭Bug均有自己的`oneos.bug-retest/v1`，且复测版本等于本次test部署版本
+- [ ] 每条已关闭Bug均有自己的`oneos.bug-retest/v1`复测通过证据；不再与顶层test部署版本做一致性比对
 - [ ] 每条`暂不修复`均列出批准人和批准记录ID/URL
-- [ ] **小程序**：复测版本为小程序测试版本标识（非空），不要求等于流水线部署版本
-- [ ] 将用`yunxiao_cli_test_lifecycle.py complete --evidence-manifest <文件>`校验文件哈希、写证据并回读，再推进两侧状态
+- [ ] 将用`yunxiao_cli_test_lifecycle.py complete --test-plan-id <计划ID>`直接回读TestHub和缺陷后推进两侧状态
+- [ ] 已明确：不要求test部署记录/执行ID/实际版本、正式测试报告ID/链接、`oneos.qa-evidence/v1`清单或哈希
 - [ ] 发布候选交接字段与幂等键
 - [ ] 确认不走浏览器点状态；回报两侧`编号 | 标题 | from→to`
 
@@ -73,8 +70,16 @@
 - [ ] 唯一父【交付】和唯一正式`ASSOCIATED`需求已回读；口令需求与关系一致
 - [ ] 关联缺陷无`待确认/处理中/已修复/再次打开`；仅允许`已关闭/暂不修复`
 - [ ] 将用`manual-complete --manual-verdict passed`，按需补齐中间态后使【测试】=`已完成`、需求=`测试完成`
-- [ ] 已声明该路径跳过部署/TestHub/manifest证据，回执标记`releaseCandidateEligible=false`，不输出发布候选交接
+- [ ] 已声明该路径跳过TestHub，回执标记`releaseCandidateEligible=false`，不输出发布候选交接
 - [ ] 确认不走浏览器点状态；两侧逐步写入并回读
+
+## 父【交付】缺迭代补绑
+
+- [ ] 已从【测试】唯一`PARENT`关系回读父【交付】编号，确认当前`sprint`为空
+- [ ] 已按父交付端别过滤已有迭代：Web/PC与小程序不得混挂；已排除归档、锁定和无版本号迭代
+- [ ] Plan已列出候选迭代名称、ID、状态和版本排序依据，并声明不会创建迭代
+- [ ] 用户已明确确认该候选；apply参数`--confirm-sprint-id`与Plan候选ID完全一致
+- [ ] apply后回读父交付编号和`sprint.id/name`，不以请求已发送代替成功
 
 ## 需求测试完成（无缺陷捷径）
 

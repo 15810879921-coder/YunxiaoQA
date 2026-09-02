@@ -320,6 +320,30 @@ def validate_testhub(executable: str, evidence: dict[str, Any],
     return {"progress": progress, "matched": matched}
 
 
+def validate_test_plan_complete(executable: str, plan_id: str) -> dict[str, Any]:
+    """Validate completion directly from TestHub without a QA manifest/report."""
+    if not str(plan_id or "").strip():
+        raise core.AdapterError("完成测试必须提供--test-plan-id。")
+    progress = core.unwrap(core.run_devops(executable, [
+        "test-hub-get-test-plan-progress-rate",
+        "--test-plan-identifier", str(plan_id),
+    ]))
+    if not isinstance(progress, dict):
+        raise core.AdapterError("TestHub计划进度回读异常。")
+    counts = {
+        "passed": int(progress.get("paasCount", -1)),
+        "failed": int(progress.get("failureCount", -1)),
+        "blocked": int(progress.get("postponeCount", -1)),
+        "unexecuted": int(progress.get("todoCount", -1)),
+    }
+    counts["total"] = sum(counts.values())
+    if counts["total"] <= 0:
+        raise core.AdapterError("TestHub计划没有用例。")
+    if any(counts[name] != 0 for name in ("failed", "blocked", "unexecuted")):
+        raise core.AdapterError(f"TestHub计划尚未全量通过：{counts}")
+    return {"planId": str(plan_id), "progress": progress, "caseCounts": counts}
+
+
 def bug_retest(bug: dict[str, Any], deployed_version: str, *,
                match_version: bool = True) -> tuple[bool, str, str]:
     if status_name(bug) != "已关闭":
@@ -567,38 +591,7 @@ def run(args: argparse.Namespace) -> int:
         if status_name(test) not in {"待处理", "处理中"} or \
                 status_name(req) not in {"待测试", "测试中"}:
             raise core.AdapterError(f"开始测试状态门禁失败：{before}")
-        repair_needed = False
-        if args.deployment_evidence:
-            deployment_repair = load_deployment_repair(
-                args.deployment_evidence, test, req, args.space_id,
-            )
-            repaired_description = replace_deployment_block(
-                str(test.get("description") or ""), deployment_block(deployment_repair)
-            )
-            repair_needed = repaired_description != str(test.get("description") or "")
-            if repair_needed and args.apply:
-                test = update_item(executable, str(test["id"]), {
-                    "description": repaired_description,
-                    "formatType": str(test.get("formatType") or "MARKDOWN"),
-                })
-            elif repair_needed:
-                test = {**test, "description": repaired_description}
-        try:
-            deployment = validate_deployment(test, req, args.space_id)
-        except (core.AdapterError, ValueError, json.JSONDecodeError) as exc:
-            raise core.AdapterError(
-                "开始测试部署证据门禁失败："
-                f"test={before['test']}；requirement={before['requirement']}；"
-                f"parent={item_snapshot(parent)}；{exc}"
-            ) from exc
         actions = []
-        if repair_needed:
-            actions.append({
-                "operation": "projex-update-workitem",
-                "target": args.test_sn,
-                "field": "description.oneos.test-deployment/v1",
-                "source": str(Path(args.deployment_evidence).resolve()),
-            })
         if status_name(test) != "处理中":
             actions.append({
                 "operation": "projex-update-workitem", "target": args.test_sn,
@@ -619,7 +612,6 @@ def run(args: argparse.Namespace) -> int:
                 "parent": item_snapshot(parent),
                 "associatedIds": associated,
             },
-            "deployment": deployment,
             "plannedActions": actions, "verified": False,
         }
         if args.apply:
@@ -645,6 +637,94 @@ def run(args: argparse.Namespace) -> int:
             "mode": receipt["mode"], "command": "start",
             "testTask": receipt.get("after", before)["test"],
             "requirement": receipt.get("after", before)["requirement"],
+            "verified": receipt["verified"], "receipt": str(target),
+        }, ensure_ascii=False, indent=2))
+        return 0
+    if args.command == "complete":
+        if status_name(test) not in {"处理中", "已完成"} or \
+                status_name(req) not in {"测试中", "测试完成"}:
+            raise core.AdapterError(f"完成测试状态门禁失败：{before}")
+        sprint = parent.get("sprint") if isinstance(parent.get("sprint"), dict) else {}
+        if not str(sprint.get("id") or ""):
+            raise core.AdapterError(
+                "父【交付】缺少迭代；请先运行yunxiao_cli_delivery_iteration.py预检，"
+                "将候选发用户确认后补绑。"
+            )
+        live_testhub = validate_test_plan_complete(
+            executable, str(getattr(args, "test_plan_id", "") or ""),
+        )
+        approvals = parse_approvals(args.risk_approval)
+        bugs = collect_bugs(
+            executable, args.space_id, str(test["id"]), "", match_version=False,
+        )
+        active = [bug for bug in bugs if bug["status"] not in {"已关闭", "暂不修复"}]
+        missing = [bug for bug in bugs if bug["status"] == "暂不修复"
+                   and bug["serialNumber"].upper() not in approvals]
+        closed_invalid = [bug for bug in bugs if bug["status"] == "已关闭"
+                          and not bug["retestEvidenceValid"]]
+        extra = sorted(set(approvals) - {bug["serialNumber"].upper() for bug in bugs
+                                        if bug["status"] == "暂不修复"})
+        if active or missing or closed_invalid or extra:
+            raise core.AdapterError(json.dumps({
+                "activeBugs": active, "missingRiskApprovals": missing,
+                "closedWithoutRetest": closed_invalid, "extraApprovals": extra,
+            }, ensure_ascii=False))
+        actions: list[dict[str, Any]] = []
+        if status_name(test) != "已完成":
+            actions.append({"operation": "projex-update-workitem",
+                            "target": args.test_sn, "status": "已完成"})
+        if status_name(req) != "测试完成":
+            actions.append({"operation": "projex-update-workitem",
+                            "target": args.req_sn, "status": "测试完成"})
+        receipt: dict[str, Any] = {
+            "schemaVersion": SCHEMA,
+            "mode": "apply" if args.apply else "preflight",
+            "command": "complete",
+            "evidenceMode": "testhub-and-defect-gates",
+            "releaseCandidateEligible": True,
+            "organizationId": auth["organizationId"],
+            "projectId": args.space_id,
+            "before": before,
+            "relations": {
+                "parentIds": parents,
+                "parent": {**item_snapshot(parent), "sprint": {
+                    "id": str(sprint.get("id") or ""),
+                    "name": str(sprint.get("name") or ""),
+                }},
+                "associatedIds": associated,
+            },
+            "testHub": live_testhub,
+            "bugs": bugs,
+            "riskApprovals": approvals,
+            "plannedActions": actions,
+            "verified": False,
+        }
+        if args.apply:
+            if status_name(test) != "已完成":
+                test = update_status_checked(
+                    executable, args.space_id, test, "已完成",
+                )
+            if status_name(req) != "测试完成":
+                req = update_status_checked(
+                    executable, args.space_id, req, "测试完成",
+                )
+            receipt["after"] = {
+                "test": item_snapshot(test), "requirement": item_snapshot(req),
+            }
+            receipt["verified"] = status_name(test) == "已完成" and \
+                status_name(req) == "测试完成"
+            if not receipt["verified"]:
+                raise core.AdapterError("测试完成状态写入后回读失败。")
+        target = Path(args.output) if args.output else core.output_dir() / \
+            f"qa-lifecycle-{args.test_sn.lower()}-complete.json"
+        core.write_json(target, receipt)
+        print(json.dumps({
+            "mode": receipt["mode"], "command": "complete",
+            "testTask": receipt.get("after", before)["test"],
+            "requirement": receipt.get("after", before)["requirement"],
+            "testPlan": live_testhub,
+            "bugs": len(bugs),
+            "releaseCandidateEligible": True,
             "verified": receipt["verified"], "receipt": str(target),
         }, ensure_ascii=False, indent=2))
         return 0
@@ -796,6 +876,7 @@ def main() -> int:
     parser.add_argument("--req-sn")
     parser.add_argument("--evidence-manifest")
     parser.add_argument("--deployment-evidence")
+    parser.add_argument("--test-plan-id")
     parser.add_argument("--risk-approval", action="append", default=[])
     parser.add_argument("--manual-verdict", choices=(MANUAL_VERDICT,))
     parser.add_argument("--idempotency-key", required=True)

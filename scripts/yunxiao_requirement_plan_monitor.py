@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Monitor new Yunxiao requirements and create idempotent TestHub plans.
+"""Monitor new Yunxiao delivery tasks and create idempotent TestHub plans.
 
-The monitor only creates plans for requirements whose subject contains the exact
-marker ``【新增】``. Existing testcase matches are reported for confirmation; this
-script never plans/adds testcases because Yunxiao does not expose that write in
-the public OAPI.
+The monitor only creates plans for Task workitems whose subject contains both
+the exact markers ``【交付】`` and ``【新增】``. Existing testcase matches are
+reported for confirmation; this script never plans/adds testcases because
+Yunxiao does not expose that write in the public OAPI.
 """
 
 from __future__ import annotations
@@ -28,6 +28,7 @@ DEFAULT_PROJECT_CODE = "01_ONEOS"
 DEFAULT_PROJECT_ID = "1280be963a5a2cc126a4118dca"
 DEFAULT_MANAGER_NAME = "谢佳伟"
 TITLE_MARKER = "【新增】"
+DELIVERY_MARKER = "【交付】"
 SHANGHAI_TZ = timezone(timedelta(hours=8))
 GENERIC_PREFIXES = ("新增", "增加", "支持", "实现", "需求", "功能")
 GENERIC_SUFFIXES = ("需求", "功能", "能力", "优化")
@@ -60,7 +61,7 @@ def require_config() -> dict[str, str]:
     if missing:
         raise MonitorError(
             "AUTH_CONFIG_MISSING：缺少 " + ", ".join(missing)
-            + "；本轮未读取需求、未创建测试计划。请在本机安全配置环境变量，禁止在聊天中粘贴令牌。"
+            + "；本轮未读取交付任务、未创建测试计划。请在本机安全配置环境变量，禁止在聊天中粘贴令牌。"
         )
     endpoint = os.environ.get("ALIBABA_CLOUD_YUNXIAO_ENDPOINT", DEFAULT_ENDPOINT).strip().rstrip("/")
     if not endpoint.startswith("https://"):
@@ -71,26 +72,26 @@ def require_config() -> dict[str, str]:
 def default_state_path() -> Path:
     local = os.environ.get("LOCALAPPDATA", "").strip()
     root = Path(local) if local else Path(tempfile.gettempdir())
-    return root / "OneOS" / "YunxiaoQA" / "requirement-testplan-monitor.json"
+    return root / "OneOS" / "YunxiaoQA" / "delivery-testplan-monitor.json"
 
 
 def default_receipt_path() -> Path:
     root = Path(os.environ.get("TEMP", tempfile.gettempdir())) / "OneOS" / "YunxiaoQA" / "receipts"
     stamp = datetime.now(SHANGHAI_TZ).strftime("%Y%m%d-%H%M%S")
-    return root / f"requirement-testplan-monitor-{stamp}.json"
+    return root / f"delivery-testplan-monitor-{stamp}.json"
 
 
 def load_state(path: Path) -> dict[str, Any]:
     if not path.exists():
-        return {"schemaVersion": "oneos.yunxiao-requirement-plan-monitor/v1", "requirements": {}}
+        return {"schemaVersion": "oneos.yunxiao-delivery-plan-monitor/v1", "deliveries": {}}
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise MonitorError(f"状态文件无法读取：{path}：{exc}") from exc
-    if not isinstance(data, dict) or not isinstance(data.get("requirements", {}), dict):
+    if not isinstance(data, dict) or not isinstance(data.get("deliveries", {}), dict):
         raise MonitorError(f"状态文件格式无效：{path}")
-    data.setdefault("schemaVersion", "oneos.yunxiao-requirement-plan-monitor/v1")
-    data.setdefault("requirements", {})
+    data.setdefault("schemaVersion", "oneos.yunxiao-delivery-plan-monitor/v1")
+    data.setdefault("deliveries", {})
     return data
 
 
@@ -102,15 +103,16 @@ def write_json(path: Path, value: Any) -> None:
 
 
 def qualifies(subject: str) -> bool:
-    return TITLE_MARKER in str(subject)
+    text = str(subject)
+    return DELIVERY_MARKER in text and TITLE_MARKER in text
 
 
 def normalize_plan_name(subject: str, max_length: int = 40) -> str:
-    text = str(subject).replace(TITLE_MARKER, " ")
+    text = str(subject).replace(DELIVERY_MARKER, " ").replace(TITLE_MARKER, " ")
     text = re.sub(r"\s+", " ", text).strip(" -_—:：;；,，。")
     text = re.sub(r"^[\[【][^\]】]+[\]】]\s*", "", text).strip()
     if not text:
-        text = "新增需求测试"
+        text = "新增交付测试"
     return text[:max_length].rstrip()
 
 
@@ -149,11 +151,11 @@ def item_id(item: dict[str, Any]) -> str:
     return ""
 
 
-def sprint_id(requirement: dict[str, Any]) -> str:
-    sprint = requirement.get("sprint")
+def sprint_id(delivery: dict[str, Any]) -> str:
+    sprint = delivery.get("sprint")
     if isinstance(sprint, dict):
         return str(sprint.get("id") or sprint.get("identifier") or "")
-    return str(requirement.get("sprintIdentifier") or "")
+    return str(delivery.get("sprintIdentifier") or "")
 
 
 def exact_named(items: Iterable[dict[str, Any]], name: str, keys: tuple[str, ...]) -> list[dict[str, Any]]:
@@ -221,7 +223,7 @@ class YunxiaoOAPI:
             raise MonitorError(f"人员“{name}”缺少 userId。")
         return matches[0]
 
-    def search_requirements(self, project_id: str, marker: str, max_pages: int = 10) -> list[dict[str, Any]]:
+    def search_deliveries(self, project_id: str, marker: str, max_pages: int = 10) -> list[dict[str, Any]]:
         condition = {
             "conditionGroups": [[{
                 "fieldIdentifier": "subject",
@@ -238,7 +240,7 @@ class YunxiaoOAPI:
                 "POST",
                 self.org_path("projex", "/workitems:search"),
                 body={
-                    "category": "Req",
+                    "category": "Task",
                     "conditions": json.dumps(condition, ensure_ascii=False, separators=(",", ":")),
                     "orderBy": "gmtCreate",
                     "page": page,
@@ -375,15 +377,15 @@ def search_all_visible_cases(client: YunxiaoOAPI, subject: str) -> tuple[list[di
     return matches, errors
 
 
-def make_plan_body(requirement: dict[str, Any], project_id: str, manager_id: str,
+def make_plan_body(delivery: dict[str, Any], project_id: str, manager_id: str,
                    name: str, sprint_identifier: str, today: date | None = None) -> dict[str, Any]:
     start, end = plan_dates(today)
-    serial = str(requirement.get("serialNumber") or "")
-    requirement_identifier = item_id(requirement)
+    serial = str(delivery.get("serialNumber") or "")
+    delivery_identifier = item_id(delivery)
     description = (
-        "由 YunxiaoQA 每日需求监测自动创建。\n"
-        f"需求：{serial or requirement_identifier} {requirement.get('subject') or ''}\n"
-        f"幂等标识：YunxiaoQA requirement={requirement_identifier}"
+        "由 YunxiaoQA 每日交付任务监测自动创建。\n"
+        f"交付任务：{serial or delivery_identifier} {delivery.get('subject') or ''}\n"
+        f"幂等标识：YunxiaoQA delivery={delivery_identifier}"
     )
     return {
         "description": description,
@@ -398,24 +400,24 @@ def make_plan_body(requirement: dict[str, Any], project_id: str, manager_id: str
     }
 
 
-def process_requirement(client: YunxiaoOAPI, requirement: dict[str, Any], *, project_id: str,
-                        manager_id: str, apply: bool) -> dict[str, Any]:
-    requirement_identifier = item_id(requirement)
-    subject = str(requirement.get("subject") or "")
-    serial = str(requirement.get("serialNumber") or "")
-    sprint_identifier = sprint_id(requirement)
+def process_delivery(client: YunxiaoOAPI, delivery: dict[str, Any], *, project_id: str,
+                     manager_id: str, apply: bool) -> dict[str, Any]:
+    delivery_identifier = item_id(delivery)
+    subject = str(delivery.get("subject") or "")
+    serial = str(delivery.get("serialNumber") or "")
+    sprint_identifier = sprint_id(delivery)
     base = {
-        "requirementId": requirement_identifier,
+        "deliveryId": delivery_identifier,
         "serialNumber": serial,
         "subject": subject,
         "sprintIdentifier": sprint_identifier,
     }
-    if not requirement_identifier:
-        return {**base, "status": "blocked", "error": "需求缺少内部 ID。"}
+    if not delivery_identifier:
+        return {**base, "status": "blocked", "error": "交付任务缺少内部 ID。"}
     if not sprint_identifier:
-        return {**base, "status": "pending", "error": "需求未选择迭代；未创建测试计划，将在下次监测重试。"}
+        return {**base, "status": "pending", "error": "交付任务未选择迭代；未创建测试计划，将在下次监测重试。"}
     plan_name = normalize_plan_name(subject)
-    body = make_plan_body(requirement, project_id, manager_id, plan_name, sprint_identifier)
+    body = make_plan_body(delivery, project_id, manager_id, plan_name, sprint_identifier)
     plans = client.list_test_plans(project_id, sprint_identifier, plan_name)
     existing = find_existing_plan(plans, plan_name)
     if not apply and not existing:
@@ -468,15 +470,17 @@ def run(args: argparse.Namespace, client: YunxiaoOAPI) -> dict[str, Any]:
     validate_project(project, args.project_code, args.project_id)
     member = client.find_member(args.manager_name)
     manager_id = str(member.get("userId") or member.get("id"))
-    requirements = client.search_requirements(args.project_id, TITLE_MARKER, args.max_pages)
+    deliveries = client.search_deliveries(args.project_id, TITLE_MARKER, args.max_pages)
     state = load_state(args.state_file)
     receipt: dict[str, Any] = {
-        "schemaVersion": "oneos.yunxiao-requirement-plan-monitor-run/v1",
+        "schemaVersion": "oneos.yunxiao-delivery-plan-monitor-run/v1",
         "generatedAt": now_iso(),
         "mode": "apply" if args.apply else "preflight",
         "frequency": "daily",
         "rule": {
             "titleMarker": TITLE_MARKER,
+            "deliveryMarker": DELIVERY_MARKER,
+            "workitemCategory": "Task",
             "projectCode": args.project_code,
             "projectId": args.project_id,
             "manager": args.manager_name,
@@ -487,40 +491,40 @@ def run(args: argparse.Namespace, client: YunxiaoOAPI) -> dict[str, Any]:
         },
         "projectReadback": {"id": item_id(project), "customCode": project.get("customCode"), "name": project.get("name")},
         "memberReadback": {"id": manager_id, "name": member.get("name"), "status": member.get("status")},
-        "qualifiedRequirementCount": len(requirements),
+        "qualifiedDeliveryCount": len(deliveries),
         "results": [],
     }
 
     if not state.get("initializedAt") and not args.bootstrap_existing:
         receipt["bootstrap"] = {
             "status": "baseline-created" if args.apply else "baseline-planned",
-            "historicalQualifiedRequirementsIgnored": len(requirements),
-            "note": "首次成功运行仅建立基线，不为历史需求创建计划。",
+            "historicalQualifiedDeliveriesIgnored": len(deliveries),
+            "note": "首次成功运行仅建立基线，不为历史交付任务创建计划。",
         }
         if args.apply:
             state["initializedAt"] = now_iso()
-            for requirement in requirements:
-                identifier = item_id(requirement)
+            for delivery in deliveries:
+                identifier = item_id(delivery)
                 if identifier:
-                    state["requirements"][identifier] = {
+                    state["deliveries"][identifier] = {
                         "status": "baseline",
-                        "subject": requirement.get("subject"),
-                        "serialNumber": requirement.get("serialNumber"),
+                        "subject": delivery.get("subject"),
+                        "serialNumber": delivery.get("serialNumber"),
                         "observedAt": now_iso(),
                     }
             write_json(args.state_file, state)
         return receipt
 
     state.setdefault("initializedAt", now_iso())
-    known = state["requirements"]
-    for requirement in reversed(requirements):
-        identifier = item_id(requirement)
+    known = state["deliveries"]
+    for delivery in reversed(deliveries):
+        identifier = item_id(delivery)
         prior = known.get(identifier, {}) if identifier else {}
         if prior.get("status") in {"baseline", "awaiting-case-confirmation", "no-matching-cases", "created", "reused"}:
             continue
-        result = process_requirement(
+        result = process_delivery(
             client,
-            requirement,
+            delivery,
             project_id=args.project_id,
             manager_id=manager_id,
             apply=args.apply,
@@ -531,19 +535,19 @@ def run(args: argparse.Namespace, client: YunxiaoOAPI) -> dict[str, Any]:
     if args.apply:
         state["lastSuccessfulScanAt"] = now_iso()
         write_json(args.state_file, state)
-    receipt["newRequirementCount"] = len(receipt["results"])
+    receipt["newDeliveryTaskCount"] = len(receipt["results"])
     return receipt
 
 
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="每日监测【新增】需求并创建云效测试计划")
+    parser = argparse.ArgumentParser(description="每日监测【交付】【新增】任务并创建云效测试计划")
     parser.add_argument("--project-code", default=DEFAULT_PROJECT_CODE)
     parser.add_argument("--project-id", default=os.environ.get("YUNXIAO_QA_PROJECT_ID", DEFAULT_PROJECT_ID))
     parser.add_argument("--manager-name", default=DEFAULT_MANAGER_NAME)
     parser.add_argument("--max-pages", type=int, default=10)
     parser.add_argument("--state-file", type=Path, default=default_state_path())
     parser.add_argument("--receipt", type=Path, default=default_receipt_path())
-    parser.add_argument("--bootstrap-existing", action="store_true", help="首次运行也处理当前匹配需求（默认只建立基线）")
+    parser.add_argument("--bootstrap-existing", action="store_true", help="首次运行也处理当前匹配交付任务（默认只建立基线）")
     parser.add_argument("--apply", action="store_true", help="创建计划并写入幂等状态；省略则仅预检")
     return parser
 
@@ -559,7 +563,7 @@ def main() -> int:
         "mode": receipt["mode"],
         "frequency": receipt["frequency"],
         "bootstrap": receipt.get("bootstrap"),
-        "newRequirementCount": receipt.get("newRequirementCount", 0),
+        "newDeliveryTaskCount": receipt.get("newDeliveryTaskCount", 0),
         "results": receipt["results"],
         "receipt": str(args.receipt),
         "stateFile": str(args.state_file),
@@ -574,4 +578,3 @@ if __name__ == "__main__":
     except MonitorError as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, ensure_ascii=False), file=sys.stderr)
         raise SystemExit(2)
-

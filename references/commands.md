@@ -3,7 +3,7 @@
 ```text
 拉取测试任务：状态=待处理|处理中；[项目=…]
 开始测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]
-记录测试证据：测试任务=ONEOS-xx；证据清单=<oneos.qa-evidence/v1 JSON文件>
+记录历史测试证据（可选）：测试任务=ONEOS-xx；证据清单=<JSON文件>
 发起缺陷：标题=…；描述=…；[测试任务=ONEOS-xx | 交付=ONEOS-xx]；[负责人=…]；[证据=…]
 从测试用例发起缺陷：测试用例=CASE-xx；标题=…；描述=…；[测试任务=ONEOS-xx]；[负责人=…]；[证据=…]
 发起缺陷(非本期)：标题=…；描述=…；负责人=…；[项目=…]
@@ -11,7 +11,7 @@
 批量关闭已修复：缺陷=ONEOS-a；复测用例=CASE-ID；复测执行=RUN-ID；test版本=VERSION；证据=ID或URL；验证人=当前用户
 再次打开：缺陷=ONEOS-xx；[原因=复现说明]；[证据=…]
 并入当期迭代：缺陷=… 或 范围=已关闭且未挂迭代；迭代=（当期/指定名）
-完成测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]；证据清单=<oneos.qa-evidence/v1 JSON文件>；[暂不修复批准=BUG-ID:批准人|证据]
+完成测试：测试任务=ONEOS-xx；[需求=ONEOS-yy]；测试计划=<TestHub计划ID>；[暂不修复批准=BUG-ID:批准人|证据]
 人工验证通过并完成：测试任务=ONEOS-xx；[需求=ONEOS-yy]
 需求测试完成：测试任务=ONEOS-xx；[需求=ONEOS-yy]
 接收发布回流：发版任务=TASK-900；触发=发布失败|产品验收失败；证据=ID或URL
@@ -109,12 +109,12 @@
 ### 开始、记录证据与完成测试
 
 - `开始测试`同时推进【测试】`待处理→处理中`和需求`待测试→测试中`。
-- `记录测试证据`使用`yunxiao_cli_test_lifecycle.py record`幂等写入并回读证据，不推进状态。
-- `record|complete`必须传`--evidence-manifest`，由脚本读取、校验真实证据清单与test部署、项目、迭代、需求、测试任务的一致性；不再接受聊天参数自报计划、用例、执行、报告和计数。
-- test部署证据按`deliveryEnd`分流：**Web**要求test环境成功部署；**小程序**接受`testPipeline=skipped`，跳过流水线与自动化测试证据，但测试计划、用例执行、报告和逐Bug复测证据一律不放宽。
-- `完成测试`须校验关系、证据清单、用例计数闭合、逐Bug复测证据与暂不修复批准，同时推进【测试】`处理中→已完成`和需求`测试中→测试完成`。
+- `记录历史测试证据`是可选兼容动作：使用`yunxiao_cli_test_lifecycle.py record --evidence-manifest ...`幂等写入并回读，不推进状态，也不构成完成测试前置条件。
+- `完成测试`必须传`--test-plan-id`，由脚本直接回读 TestHub 计划进度；不接受聊天自报用例计数。
+- `完成测试`须校验正式关系、父【交付】迭代、当前计划用例总数大于0且未执行/失败/阻塞均为0、逐Bug复测记录与暂不修复批准，同时推进【测试】`处理中→已完成`和需求`测试中→测试完成`。
+- 不要求test环境部署成功记录、部署执行ID/实际版本、正式测试报告ID/链接或`oneos.qa-evidence/v1`清单/哈希；历史资料存在时可保留，但不得作为开始或完成测试门禁。
 - **唯一完整入口**：`skill-run yunxiao_cli_test_lifecycle.py start|record|complete ...`（先预检，确认后加`--apply`；启动规则见 [runtime-launcher.md](runtime-launcher.md)）。
-- 旧`close_test_task.py`仅保留为拒绝式兼容入口，固定不写状态并返回完整`complete --evidence-manifest`命令；不得用于正式闭环。
+- 旧`close_test_task.py`仅保留为拒绝式兼容入口，固定不写状态并返回完整`complete --test-plan-id`命令；不得用于正式闭环。
 - 完整参数、证据区块和发布交接见 [test-execution.md](test-execution.md)。
 - 回报必须含两侧`serialNumber | subject | from→to`；任一回读不符则停。
 - **禁止**浏览器点状态菜单 / 可交互节点。
@@ -126,7 +126,7 @@
 - 前置：【测试】=`已完成`；验证结论通过（评论或用户确认）；关联缺陷无`待确认/处理中/已修复/再次打开`。
 - 动作：需求`测试中→测试完成`；编号硬门禁 + 回读。
 - **脚本**：`skill-run yunxiao_cli_req_test_complete.py --space-id <项目ID> --test-sn ONEOS-xx [--req-sn ONEOS-yy] [--test-plan-id <计划ID>]`；确认后加 `--apply`。
-- 与完整`完成测试`并列：本口令**不**代替 TestHub/证据清单门禁；用于任务已完成且无缺陷时单独回写需求。
+- 与完整`完成测试`并列：本口令**不**代替 TestHub 计划结果和缺陷闭环门禁；用于任务已完成且无缺陷时单独回写需求。
 - 写操作 → 必须 Plan。
 
 ### 人工验证通过并完成

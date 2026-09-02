@@ -12,8 +12,9 @@
 | `create_bug_openapi.py` | 机器已配置 PAT 时，通过官方 OpenAPI 发起非本期独立缺陷、上传附件并回读关键字段 |
 | `comment_bug_openapi.py` | 机器已配置 PAT 时，通过官方 OpenAPI 发布缺陷评论并做幂等回读校验 |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭时强制逐Bug复测证据；再次打开保留原证据（含编号回读） |
-| `yunxiao_cli_test_lifecycle.py` | **测试生命周期**：常规闭环校验test部署/TestHub/QA证据；人工确认通过时可用`manual-complete`同步任务与需求完成态（非发布候选） |
-| `yunxiao_requirement_plan_monitor.py` | **每日新增需求监测**：仅01_ONEOS标题含`【新增】`的新需求；同迭代自动建14天测试计划；全可见用例库匹配后通知确认，不自动加用例 |
+| `yunxiao_cli_test_lifecycle.py` | **测试生命周期**：常规闭环直接校验TestHub计划与缺陷，不要求部署记录、正式报告或QA manifest/哈希；人工确认通过时可用`manual-complete`同步任务与需求完成态（非发布候选） |
+| `yunxiao_cli_delivery_iteration.py` | **父交付迭代补绑**：从测试任务唯一父交付检查迭代；缺失时预检同端最新已有版本候选，用户确认候选ID后才允许apply并回读 |
+| `yunxiao_delivery_plan_monitor.py` | **每日新增交付任务监测**：仅01_ONEOS中Task标题同时含`【交付】【新增】`的新交付任务；同交付迭代自动建14天测试计划；全可见用例库匹配后通知确认，不自动加用例 |
 | `transit_test_lifecycle.py` | 旧Cookie兼容实现；新执行禁止使用 |
 | `close_test_task.py` | 已停用的旧入口：固定拒绝写入并指向完整闭环命令 |
 | `discover_bug_constants.py` | 早期探测（常量已写入 runtime-ids） |
@@ -44,16 +45,16 @@ skill-run create_bug_openapi.py --title '【模块】问题' --assignee 张三 `
 去掉 `--dry-run` 后，脚本会执行精确标题查重、创建、附件上传，并回读标题、
 状态、负责人、验证者、创建人、标签、优先级、严重程度与附件名称/大小。
 
-每日需求监测使用相同 PAT/组织 ID，中心版默认接入点为
+每日交付任务监测使用相同 PAT/组织 ID，中心版默认接入点为
 `https://openapi-rdc.aliyuncs.com`；Region 版另设
-`ALIBABA_CLOUD_YUNXIAO_ENDPOINT`。首次成功运行默认只建立基线，不补建历史需求：
+`ALIBABA_CLOUD_YUNXIAO_ENDPOINT`。首次成功运行默认只建立基线，不补建历史交付任务：
 
 ```powershell
 # 预检
-skill-run yunxiao_requirement_plan_monitor.py
+skill-run yunxiao_delivery_plan_monitor.py
 
 # 已按Plan确认后，由每日自动化执行
-skill-run yunxiao_requirement_plan_monitor.py --apply
+skill-run yunxiao_delivery_plan_monitor.py --apply
 ```
 
 输出中的`awaiting-case-confirmation`表示计划已建且找到用例，必须将计划ID、
@@ -88,21 +89,15 @@ skill-run transit_bug.py --sn DEMO-91 --from 已修复 --to 已关闭 `
   --retest-evidence https://example.invalid/evidence/RUN-9001 `
   --environment test --deployed-version v2026.07.31.1 --verified-by USER-1 --dry-run
 
-# 测试中记录证据（读取真实证据清单，不推进状态）
-skill-run yunxiao_cli_test_lifecycle.py record --space-id <项目ID> `
-  --test-sn ONEOS-343 --req-sn ONEOS-300 `
-  --evidence-manifest C:\evidence\ONEOS-343.json `
-  --idempotency-key qa-ONEOS-343-v1
-
 # 开始测试（先预检；同一命令加 --apply 才写入）
 skill-run yunxiao_cli_test_lifecycle.py start --space-id <项目ID> `
   --test-sn ONEOS-343 --req-sn ONEOS-300 `
   --idempotency-key qa-start-ONEOS-343
 
-# 完成测试（先预检；同一命令加 --apply 才写入）
+# 完成测试（先预检；直接回读TestHub；同一命令加 --apply 才写入）
 skill-run yunxiao_cli_test_lifecycle.py complete --space-id <项目ID> `
   --test-sn ONEOS-343 --req-sn ONEOS-300 `
-  --evidence-manifest C:\evidence\ONEOS-343.json `
+  --test-plan-id <TestHub计划ID> `
   --idempotency-key qa-ONEOS-343-v1
 
 # 人工验证通过快捷闭环（先预检；Plan确认后加 --apply）

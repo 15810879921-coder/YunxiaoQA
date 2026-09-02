@@ -1,6 +1,6 @@
-﻿{
-    "client":  "cursor",
-    "skill":  "YunxiaoQA",
-    "archive":  "YunxiaoQA.zip",
-    "sha256":  "cb7f8571bfbb69388a42350074d55666cfdcb06769011364e516dab78e6098f9"
+{
+  "client": "cursor",
+  "skill": "YunxiaoQA",
+  "archive": "YunxiaoQA.zip",
+  "sha256": "42003f6a1ce44b06e7ebc4e386d9725168fbf39e7085b090de4732acdb1337c5"
 }
