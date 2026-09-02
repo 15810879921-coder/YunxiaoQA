@@ -15,6 +15,45 @@ import yunxiao_cli_test_lifecycle as lifecycle  # noqa: E402
 
 
 class YunxiaoCliTestLifecycleTests(unittest.TestCase):
+    def test_task_flow_uses_title_markers_and_new_has_priority(self) -> None:
+        self.assertEqual(
+            lifecycle.task_flow("【测试】【优化】【新增】功能"),
+            lifecycle.TASK_FLOW_NEW,
+        )
+        self.assertEqual(
+            lifecycle.task_flow("【测试】【优化】功能"),
+            lifecycle.TASK_FLOW_OPTIMIZATION,
+        )
+        with self.assertRaisesRegex(lifecycle.core.AdapterError, "缺少【新增】或【优化】"):
+            lifecycle.task_flow("【测试】未分类任务")
+
+    def test_latest_decisive_comment_must_be_passed(self) -> None:
+        comments = [
+            {
+                "id": "comment-1", "content": "测试结果：通过",
+                "createdAt": "2026-09-02T10:00:00+08:00",
+            },
+            {
+                "id": "comment-2", "content": "复测失败，问题仍然存在",
+                "createdAt": "2026-09-02T11:00:00+08:00",
+            },
+        ]
+        with patch.object(lifecycle, "list_workitem_comments", return_value=comments):
+            with self.assertRaisesRegex(
+                    lifecycle.core.AdapterError,
+                    "optimization_latest_comment_not_passed"):
+                lifecycle.require_latest_pass_comment("aliyun", "test-1")
+
+    def test_latest_pass_comment_is_returned_as_evidence(self) -> None:
+        comments = [{
+            "id": "comment-1", "content": "验证结论：已通过",
+            "createdAt": "2026-09-02T11:00:00+08:00",
+        }]
+        with patch.object(lifecycle, "list_workitem_comments", return_value=comments):
+            result = lifecycle.require_latest_pass_comment("aliyun", "test-1")
+        self.assertEqual(result["id"], "comment-1")
+        self.assertIn("通过", result["content"])
+
     def test_requirement_is_inferred_from_unique_associated_id(self) -> None:
         row = {"id": "req-1", "serialNumber": "ONEOS-500"}
         detail = {**row, "subject": "需求", "status": {"displayName": "待测试"}}
@@ -32,7 +71,8 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
 
     def test_start_preflight_does_not_require_deployment_evidence(self) -> None:
         test = {
-            "id": "test-1", "serialNumber": "ONEOS-598", "subject": "【测试】云打印",
+            "id": "test-1", "serialNumber": "ONEOS-598",
+            "subject": "【测试】【新增】云打印",
             "status": {"displayName": "待处理"},
         }
         req = {
@@ -91,7 +131,7 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
     def test_complete_preflight_needs_testhub_and_defect_gates_only(self) -> None:
         test = {
             "id": "test-1", "serialNumber": "ONEOS-703",
-            "subject": "【测试】任务", "status": {"displayName": "处理中"},
+            "subject": "【测试】【新增】任务", "status": {"displayName": "处理中"},
         }
         req = {
             "id": "req-1", "serialNumber": "ONEOS-698",
@@ -137,6 +177,97 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
         deployment.assert_not_called()
         manifest.assert_not_called()
 
+    def test_optimization_complete_uses_pass_comment_without_testhub(self) -> None:
+        test = {
+            "id": "test-1", "serialNumber": "ONEOS-703",
+            "subject": "【测试】【优化】任务", "status": {"displayName": "处理中"},
+        }
+        req = {
+            "id": "req-1", "serialNumber": "ONEOS-698",
+            "subject": "【优化】需求", "status": {"displayName": "测试中"},
+        }
+        parent = {
+            "id": "delivery-1", "serialNumber": "ONEOS-699",
+            "subject": "【交付】【优化】任务", "status": {"displayName": "处理中"},
+            "sprint": {"id": "sprint-1", "name": "OneOS_web端V1.4.9"},
+        }
+        closed_without_retest = [{
+            "id": "bug-1", "serialNumber": "ONEOS-704",
+            "subject": "历史已关闭缺陷", "status": "已关闭",
+            "retestEvidenceValid": False,
+        }]
+        with tempfile.TemporaryDirectory() as folder:
+            output = Path(folder) / "receipt.json"
+            args = argparse.Namespace(
+                command="complete", space_id="project", test_sn="ONEOS-703",
+                req_sn="ONEOS-698", evidence_manifest=None,
+                deployment_evidence=None, test_plan_id=None,
+                risk_approval=[], manual_verdict=None,
+                idempotency_key="qa-ONEOS-703", apply=False,
+                output=str(output),
+            )
+            with patch.object(lifecycle.core, "find_aliyun", return_value="aliyun"), \
+                    patch.object(lifecycle.core, "require_auth_env", return_value={"organizationId": "org"}), \
+                    patch.object(lifecycle, "exact_workitem", return_value=test), \
+                    patch.object(lifecycle, "relation_ids", side_effect=[["delivery-1"], ["req-1"]]), \
+                    patch.object(lifecycle, "resolve_requirement", return_value=req), \
+                    patch.object(lifecycle, "get_workitem", return_value=parent), \
+                    patch.object(lifecycle, "require_latest_pass_comment", return_value={
+                        "id": "comment-1", "content": "测试结果：通过",
+                    }), \
+                    patch.object(lifecycle, "collect_bugs", return_value=closed_without_retest), \
+                    patch.object(lifecycle, "validate_test_plan_complete") as testhub:
+                result = lifecycle.run(args)
+            receipt = json.loads(output.read_text(encoding="utf-8"))
+        self.assertEqual(result, 0)
+        self.assertEqual(receipt["taskFlow"], lifecycle.TASK_FLOW_OPTIMIZATION)
+        self.assertEqual(
+            receipt["evidenceMode"],
+            "optimization-pass-comment-and-active-defect-gate",
+        )
+        self.assertFalse(receipt["releaseCandidateEligible"])
+        self.assertEqual(receipt["passComment"]["id"], "comment-1")
+        testhub.assert_not_called()
+
+    def test_optimization_complete_rejects_active_bug(self) -> None:
+        test = {
+            "id": "test-1", "serialNumber": "ONEOS-703",
+            "subject": "【测试】【优化】任务", "status": {"displayName": "处理中"},
+        }
+        req = {
+            "id": "req-1", "serialNumber": "ONEOS-698",
+            "subject": "【优化】需求", "status": {"displayName": "测试中"},
+        }
+        parent = {
+            "id": "delivery-1", "serialNumber": "ONEOS-699",
+            "subject": "【交付】【优化】任务", "status": {"displayName": "处理中"},
+            "sprint": {"id": "sprint-1", "name": "OneOS_web端V1.4.9"},
+        }
+        args = argparse.Namespace(
+            command="complete", space_id="project", test_sn="ONEOS-703",
+            req_sn="ONEOS-698", evidence_manifest=None,
+            deployment_evidence=None, test_plan_id=None,
+            risk_approval=[], manual_verdict=None,
+            idempotency_key="qa-ONEOS-703", apply=False, output=None,
+        )
+        with patch.object(lifecycle.core, "find_aliyun", return_value="aliyun"), \
+                patch.object(lifecycle.core, "require_auth_env", return_value={"organizationId": "org"}), \
+                patch.object(lifecycle, "exact_workitem", return_value=test), \
+                patch.object(lifecycle, "relation_ids", side_effect=[["delivery-1"], ["req-1"]]), \
+                patch.object(lifecycle, "resolve_requirement", return_value=req), \
+                patch.object(lifecycle, "get_workitem", return_value=parent), \
+                patch.object(lifecycle, "require_latest_pass_comment", return_value={
+                    "id": "comment-1", "content": "测试结果：通过",
+                }), \
+                patch.object(lifecycle, "collect_bugs", return_value=[{
+                    "id": "bug-1", "serialNumber": "ONEOS-704",
+                    "subject": "活动缺陷", "status": "已修复",
+                }]):
+            with self.assertRaisesRegex(
+                    lifecycle.core.AdapterError,
+                    "optimization_complete_has_active_bugs"):
+                lifecycle.run(args)
+
     def test_deployment_repair_file_is_validated_and_loaded(self) -> None:
         test = {"id": "test-1", "serialNumber": "ONEOS-598"}
         req = {"id": "req-1", "serialNumber": "ONEOS-500"}
@@ -178,6 +309,7 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
             "id": "delivery-1", "serialNumber": "ONEOS-699",
             "subject": "【交付】【优化】租赁合同流程优化",
             "status": {"displayName": "处理中"},
+            "sprint": {"id": "sprint-1", "name": "OneOS_web端V1.4.9"},
         }
         with tempfile.TemporaryDirectory() as folder:
             output = Path(folder) / "receipt.json"
@@ -195,11 +327,17 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
                     patch.object(lifecycle, "relation_ids", side_effect=[["delivery-1"], ["req-1"]]), \
                     patch.object(lifecycle, "resolve_requirement", return_value=req), \
                     patch.object(lifecycle, "get_workitem", return_value=parent), \
+                    patch.object(lifecycle, "require_latest_pass_comment", return_value={
+                        "id": "comment-1", "content": "测试结果：通过",
+                    }), \
                     patch.object(lifecycle, "collect_bugs", return_value=[]):
                 result = lifecycle.run(args)
             receipt = json.loads(output.read_text(encoding="utf-8"))
         self.assertEqual(result, 0)
-        self.assertEqual(receipt["evidenceMode"], "human-confirmed")
+        self.assertEqual(
+            receipt["evidenceMode"],
+            "optimization-pass-comment-and-active-defect-gate",
+        )
         self.assertFalse(receipt["releaseCandidateEligible"])
         self.assertEqual(
             [action["status"] for action in receipt["plannedActions"]],
@@ -223,6 +361,7 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
             "id": "delivery-1", "serialNumber": "ONEOS-699",
             "subject": "【交付】【优化】租赁合同流程优化",
             "status": {"displayName": "处理中"},
+            "sprint": {"id": "sprint-1", "name": "OneOS_web端V1.4.9"},
         }
 
         def changed(_executable: str, _project: str,
@@ -245,6 +384,9 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
                     patch.object(lifecycle, "relation_ids", side_effect=[["delivery-1"], ["req-1"]]), \
                     patch.object(lifecycle, "resolve_requirement", return_value=req), \
                     patch.object(lifecycle, "get_workitem", return_value=parent), \
+                    patch.object(lifecycle, "require_latest_pass_comment", return_value={
+                        "id": "comment-1", "content": "测试结果：通过",
+                    }), \
                     patch.object(lifecycle, "collect_bugs", return_value=[]), \
                     patch.object(lifecycle, "update_status_checked", side_effect=changed) as updater:
                 result = lifecycle.run(args)
@@ -260,7 +402,8 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
 
     def test_manual_complete_rejects_active_bug(self) -> None:
         test = {
-            "id": "test-1", "serialNumber": "ONEOS-703", "subject": "【测试】任务",
+            "id": "test-1", "serialNumber": "ONEOS-703",
+            "subject": "【测试】【优化】任务",
             "status": {"displayName": "处理中"},
         }
         req = {
@@ -270,6 +413,7 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
         parent = {
             "id": "delivery-1", "serialNumber": "ONEOS-699", "subject": "【交付】任务",
             "status": {"displayName": "处理中"},
+            "sprint": {"id": "sprint-1", "name": "OneOS_web端V1.4.9"},
         }
         args = argparse.Namespace(
             command="manual-complete", space_id="project", test_sn="ONEOS-703",
@@ -283,6 +427,9 @@ class YunxiaoCliTestLifecycleTests(unittest.TestCase):
                 patch.object(lifecycle, "relation_ids", side_effect=[["delivery-1"], ["req-1"]]), \
                 patch.object(lifecycle, "resolve_requirement", return_value=req), \
                 patch.object(lifecycle, "get_workitem", return_value=parent), \
+                patch.object(lifecycle, "require_latest_pass_comment", return_value={
+                    "id": "comment-1", "content": "测试结果：通过",
+                }), \
                 patch.object(lifecycle, "collect_bugs", return_value=[{
                     "serialNumber": "ONEOS-704", "subject": "活动缺陷", "status": "已修复",
                 }]):

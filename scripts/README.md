@@ -12,7 +12,7 @@
 | `create_bug_openapi.py` | 机器已配置 PAT 时，通过官方 OpenAPI 发起非本期独立缺陷、上传附件并回读关键字段 |
 | `comment_bug_openapi.py` | 机器已配置 PAT 时，通过官方 OpenAPI 发布缺陷评论并做幂等回读校验 |
 | `transit_bug.py` | 测试侧流转：已修复→已关闭时强制逐Bug复测证据；再次打开保留原证据（含编号回读） |
-| `yunxiao_cli_test_lifecycle.py` | **测试生命周期**：常规闭环直接校验TestHub计划与缺陷，不要求部署记录、正式报告或QA manifest/哈希；人工确认通过时可用`manual-complete`同步任务与需求完成态（非发布候选） |
+| `yunxiao_cli_test_lifecycle.py` | **测试生命周期**：按标题分流；【新增】校验TestHub与完整缺陷证据，【优化】校验测试任务通过评论与活动缺陷；`manual-complete`仅作【优化】兼容入口 |
 | `yunxiao_cli_delivery_iteration.py` | **父交付迭代补绑**：从测试任务唯一父交付检查迭代；缺失时预检同端最新已有版本候选，用户确认候选ID后才允许apply并回读 |
 | `yunxiao_delivery_plan_monitor.py` | **每日新增交付任务监测**：仅01_ONEOS中Task标题同时含`【交付】【新增】`的新交付任务；同交付迭代自动建14天测试计划；全可见用例库匹配后通知确认，不自动加用例 |
 | `transit_test_lifecycle.py` | 旧Cookie兼容实现；新执行禁止使用 |
@@ -94,13 +94,13 @@ skill-run yunxiao_cli_test_lifecycle.py start --space-id <项目ID> `
   --test-sn ONEOS-343 --req-sn ONEOS-300 `
   --idempotency-key qa-start-ONEOS-343
 
-# 完成测试（先预检；直接回读TestHub；同一命令加 --apply 才写入）
+# 完成测试（自动按标题分流；【新增】提供计划ID，【优化】省略）
 skill-run yunxiao_cli_test_lifecycle.py complete --space-id <项目ID> `
   --test-sn ONEOS-343 --req-sn ONEOS-300 `
   --test-plan-id <TestHub计划ID> `
   --idempotency-key qa-ONEOS-343-v1
 
-# 人工验证通过快捷闭环（先预检；Plan确认后加 --apply）
+# 【优化】兼容入口（评论区必须已有最新明确通过结论）
 skill-run yunxiao_cli_test_lifecycle.py manual-complete --space-id <项目ID> `
   --test-sn ONEOS-343 --req-sn ONEOS-300 `
   --manual-verdict passed --idempotency-key qa-manual-ONEOS-343-v1

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Advance requirement 测试中→测试完成 when test task is already 已完成 and no active bugs."""
+"""Advance a requirement after reapplying the test task's title-selected gate."""
 
 from __future__ import annotations
 
@@ -11,39 +11,31 @@ from typing import Any
 
 import yunxiao_cli_runtime as core
 from yunxiao_cli_test_lifecycle import (
+    CLOSED_BUG_STATUSES,
+    TASK_FLOW_NEW,
     collect_bugs,
     exact_workitem,
     get_workitem,
     item_snapshot,
+    parse_approvals,
+    require_latest_pass_comment,
     relation_ids,
     resolve_requirement,
     status_id,
     status_name,
+    task_flow,
     update_item,
+    validate_test_plan_complete,
 )
 
 SCHEMA = "oneos.yunxiao-req-test-complete/v1"
-ACTIVE_BUG_STATUSES = {"待确认", "处理中", "已修复", "再次打开"}
-
-
-def plan_summary(executable: str, plan_id: str) -> dict[str, Any]:
-    progress = core.unwrap(core.run_devops(executable, [
-        "test-hub-get-test-plan-progress-rate",
-        "--test-plan-identifier", plan_id,
-    ]))
-    if not isinstance(progress, dict):
-        raise core.AdapterError("TestHub计划进度回读异常。")
-    return {
-        "testPlanId": plan_id,
-        "url": f"https://devops.aliyun.com/testhub/plan/{plan_id}/dashboard",
-        "progress": progress,
-    }
 
 
 def run(args: argparse.Namespace) -> int:
     executable = core.find_aliyun()
     auth = core.require_auth_env()
     test = exact_workitem(executable, args.space_id, "Task", args.test_sn)
+    flow = task_flow(str(test.get("subject") or ""))
     associated = relation_ids(executable, str(test["id"]), "ASSOCIATED")
     req = resolve_requirement(executable, args.space_id, associated, args.req_sn)
     args.req_sn = str(req.get("serialNumber") or "")
@@ -60,9 +52,14 @@ def run(args: argparse.Namespace) -> int:
     parent = get_workitem(executable, parents[0])
     if not str(parent.get("subject") or "").startswith("【交付】"):
         raise core.AdapterError("测试任务唯一父项不是【交付】任务。")
+    sprint = parent.get("sprint") if isinstance(parent.get("sprint"), dict) else {}
+    if not str(sprint.get("id") or ""):
+        raise core.AdapterError(
+            "父【交付】缺少迭代；请先运行yunxiao_cli_delivery_iteration.py补绑。"
+        )
 
     bugs = collect_bugs(executable, args.space_id, str(test["id"]), "", match_version=False)
-    active = [bug for bug in bugs if bug["status"] in ACTIVE_BUG_STATUSES]
+    active = [bug for bug in bugs if bug["status"] not in CLOSED_BUG_STATUSES]
     if active:
         raise core.AdapterError(json.dumps({
             "error": "存在活跃缺陷，禁止需求测试完成。",
@@ -70,17 +67,54 @@ def run(args: argparse.Namespace) -> int:
         }, ensure_ascii=False))
 
     test_plan: dict[str, Any] | None = None
-    if args.test_plan_id:
-        test_plan = plan_summary(executable, args.test_plan_id)
+    pass_comment: dict[str, Any] | None = None
+    approvals: dict[str, dict[str, str]] = {}
+    if flow == TASK_FLOW_NEW:
+        test_plan = validate_test_plan_complete(
+            executable, str(args.test_plan_id or ""),
+        )
+        approvals = parse_approvals(args.risk_approval)
+        missing = [bug for bug in bugs if bug["status"] == "暂不修复"
+                   and bug["serialNumber"].upper() not in approvals]
+        closed_invalid = [bug for bug in bugs if bug["status"] == "已关闭"
+                          and not bug["retestEvidenceValid"]]
+        extra = sorted(set(approvals) - {
+            bug["serialNumber"].upper() for bug in bugs
+            if bug["status"] == "暂不修复"
+        })
+        if missing or closed_invalid or extra:
+            raise core.AdapterError(json.dumps({
+                "missingRiskApprovals": missing,
+                "closedWithoutRetest": closed_invalid,
+                "extraApprovals": extra,
+            }, ensure_ascii=False))
+    else:
+        pass_comment = require_latest_pass_comment(
+            executable, str(test["id"]),
+        )
 
     receipt: dict[str, Any] = {
         "schemaVersion": SCHEMA,
         "mode": "apply" if args.apply else "preflight",
         "organizationId": auth["organizationId"],
         "projectId": args.space_id,
+        "taskFlow": flow,
+        "evidenceMode": "testhub-and-defect-gates" if flow == TASK_FLOW_NEW
+        else "optimization-pass-comment-and-active-defect-gate",
+        "releaseCandidateEligible": flow == TASK_FLOW_NEW,
         "before": before,
+        "relations": {
+            "parentIds": parents,
+            "parent": {**item_snapshot(parent), "sprint": {
+                "id": str(sprint.get("id") or ""),
+                "name": str(sprint.get("name") or ""),
+            }},
+            "associatedIds": associated,
+        },
         "bugs": bugs,
         "testPlan": test_plan,
+        "passComment": pass_comment,
+        "riskApprovals": approvals,
         "plannedActions": [{
             "operation": "projex-update-workitem",
             "target": args.req_sn,
@@ -122,7 +156,8 @@ def main() -> int:
     parser.add_argument("--space-id", required=True)
     parser.add_argument("--test-sn", required=True)
     parser.add_argument("--req-sn")
-    parser.add_argument("--test-plan-id", help="可选；回读并记录 TestHub 计划进度到回执")
+    parser.add_argument("--test-plan-id", help="【新增】必填；官方CLI回读TestHub计划进度")
+    parser.add_argument("--risk-approval", action="append", default=[])
     parser.add_argument("--idempotency-key")
     parser.add_argument("--output", type=Path)
     parser.add_argument("--apply", action="store_true")

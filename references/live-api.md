@@ -64,7 +64,7 @@ POST /projex/api/workitem/workitem/{id}/status/transit?_input_charset=utf-8
 |---|---|
 | 已修复 → 已关闭 | `批量关闭已修复` |
 | 已修复 → 再次打开 | `再次打开` |
-| （任务）→ 已完成 | 仅`完成测试`，并通过正式关系、TestHub计划结果和逐Bug复测门禁 |
+| （任务）→ 已完成 | 仅`完成测试`；【新增】通过完整TestHub/缺陷证据，【优化】通过评论+无活动缺陷 |
 
 **禁止**测试侧：`→已修复` / `→暂不修复` / `→处理中`（开发 Skill）。
 
@@ -142,5 +142,5 @@ skill-run close_test_task.py --sn ONEOS-xx --dry-run
 
 ```powershell
 skill-run yunxiao_cli_test_lifecycle.py complete --space-id <项目ID> --test-sn ONEOS-xx --req-sn ONEOS-yy `
-  --test-plan-id <TestHub计划ID> --idempotency-key qa-ONEOS-xx-v1
+  --test-plan-id <【新增】必填；【优化】省略> --idempotency-key qa-ONEOS-xx-v1
 ```

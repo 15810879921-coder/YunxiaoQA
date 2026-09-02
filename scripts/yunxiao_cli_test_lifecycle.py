@@ -1,9 +1,10 @@
 #!/usr/bin/env python3
-"""Record and complete Yunxiao QA lifecycle through the official devops CLI.
+"""Run the Yunxiao QA lifecycle through the official devops CLI.
 
-``manual-complete`` is an explicit human-verdict shortcut.  It closes the test
-task and its formally associated requirement without claiming release-grade QA
-evidence, while retaining relation, defect-state, exact-ID, and readback gates.
+Completion is selected from the exact task-title marker: new-feature tasks use
+the full TestHub/defect evidence gate, while optimization tasks require a latest
+passing task comment and no active defects. ``manual-complete`` remains only as
+an optimization-task compatibility entrypoint.
 """
 
 from __future__ import annotations
@@ -12,6 +13,7 @@ import argparse
 import hashlib
 import html
 import json
+import re
 import sys
 from datetime import datetime
 from pathlib import Path
@@ -36,7 +38,16 @@ BUG_RETEST_SCHEMA = "oneos.bug-retest/v1"
 MANUAL_VERDICT = "passed"
 MANUAL_TEST_ALLOWED = {"待处理", "处理中", "已完成"}
 MANUAL_REQ_ALLOWED = {"待测试", "测试中", "测试完成"}
-MANUAL_BUG_CLOSED = {"已关闭", "暂不修复"}
+CLOSED_BUG_STATUSES = {"已关闭", "暂不修复"}
+TASK_FLOW_NEW = "new"
+TASK_FLOW_OPTIMIZATION = "optimization"
+PASS_COMMENT_RE = re.compile(
+    r"(?:测试|验证|复测)(?:结果|结论)?\s*[:：]?\s*(?:已|为)?\s*通过"
+)
+FAIL_COMMENT_RE = re.compile(
+    r"(?:测试|验证|复测)(?:结果|结论)?\s*[:：]?\s*(?:为)?\s*"
+    r"(?:不通过|未通过|失败|阻塞)|(?:仍(?:然)?(?:存在|复现))|再次打开"
+)
 
 
 def rows(value: Any, label: str) -> list[dict[str, Any]]:
@@ -46,6 +57,120 @@ def rows(value: Any, label: str) -> list[dict[str, Any]]:
     if not isinstance(value, list):
         raise core.AdapterError(f"{label}返回结构异常。")
     return [row for row in value if isinstance(row, dict)]
+
+
+def task_flow(subject: str) -> str:
+    """Select the completion gate from the exact test-task title markers.
+
+    【新增】wins when both markers exist so an accidental【优化】marker can never
+    weaken a new-feature task's evidence gate.
+    """
+    title = str(subject or "")
+    if not title.startswith("【测试】"):
+        raise core.AdapterError("目标工作项标题不是【测试】任务。")
+    if "【新增】" in title:
+        return TASK_FLOW_NEW
+    if "【优化】" in title:
+        return TASK_FLOW_OPTIMIZATION
+    raise core.AdapterError(
+        "测试任务标题缺少【新增】或【优化】标记，无法选择闭环门禁。"
+    )
+
+
+def list_workitem_comments(executable: str, workitem_id: str) -> list[dict[str, Any]]:
+    value = core.unwrap(core.run_devops(executable, [
+        "projex-list-workitem-comments", "--id", workitem_id,
+    ]))
+    if isinstance(value, dict):
+        for key in ("items", "comments", "list"):
+            if isinstance(value.get(key), list):
+                value = value[key]
+                break
+    return rows(value, "测试任务评论查询")
+
+
+def _string_content(value: Any) -> list[str]:
+    if isinstance(value, str):
+        return [value]
+    if isinstance(value, list):
+        return [part for item in value for part in _string_content(item)]
+    if isinstance(value, dict):
+        return [part for item in value.values() for part in _string_content(item)]
+    return []
+
+
+def comment_text(item: dict[str, Any]) -> str:
+    for key in ("content", "comment", "body", "text"):
+        if key in item:
+            text = " ".join(_string_content(item[key]))
+            if text.strip():
+                return html.unescape(re.sub(r"<[^>]+>", " ", text)).strip()
+    return ""
+
+
+def comment_timestamp(item: dict[str, Any]) -> float | None:
+    for key in (
+        "gmtCreate", "createdAt", "createTime", "createdTime",
+        "gmtModified", "updatedAt", "updateTime",
+    ):
+        value = item.get(key)
+        if isinstance(value, (int, float)):
+            return float(value)
+        text = str(value or "").strip()
+        if not text:
+            continue
+        if text.isdigit():
+            return float(text)
+        try:
+            return datetime.fromisoformat(text.replace("Z", "+00:00")).timestamp()
+        except ValueError:
+            continue
+    return None
+
+
+def comment_verdict(text: str) -> str | None:
+    matches = [(match.start(), "failed") for match in FAIL_COMMENT_RE.finditer(text)]
+    matches.extend((match.start(), "passed") for match in PASS_COMMENT_RE.finditer(text))
+    return max(matches, default=(0, None), key=lambda row: row[0])[1]
+
+
+def require_latest_pass_comment(executable: str,
+                                workitem_id: str) -> dict[str, Any]:
+    decisive: list[dict[str, Any]] = []
+    for index, item in enumerate(list_workitem_comments(executable, workitem_id)):
+        text = comment_text(item)
+        verdict = comment_verdict(text)
+        if verdict:
+            decisive.append({
+                "index": index,
+                "timestamp": comment_timestamp(item),
+                "verdict": verdict,
+                "snapshot": {
+                    "id": str(item.get("id") or item.get("identifier") or ""),
+                    "createdAt": item.get("gmtCreate") or item.get("createdAt")
+                    or item.get("createTime") or item.get("createdTime"),
+                    "content": text[:500],
+                },
+            })
+    if not decisive:
+        raise core.AdapterError(
+            "【优化】测试任务缺少明确的测试通过评论（如“测试结果：通过”）。"
+        )
+    if any(row["timestamp"] is None for row in decisive):
+        verdicts = {str(row["verdict"]) for row in decisive}
+        if len(verdicts) > 1:
+            raise core.AdapterError(
+                "测试任务存在互相冲突的通过/不通过评论且时间不可排序，请补充最新明确结论。"
+            )
+        latest = decisive[-1]
+    else:
+        latest = max(decisive, key=lambda row: (float(row["timestamp"]), int(row["index"])))
+    if latest["verdict"] != "passed":
+        raise core.AdapterError(json.dumps({
+            "error": "optimization_latest_comment_not_passed",
+            "latestConclusion": latest["snapshot"],
+        }, ensure_ascii=False))
+    return latest["snapshot"]
 
 
 def get_workitem(executable: str, workitem_id: str) -> dict[str, Any]:
@@ -477,6 +602,7 @@ def run(args: argparse.Namespace) -> int:
     executable = core.find_aliyun()
     auth = core.require_auth_env()
     test = exact_workitem(executable, args.space_id, "Task", args.test_sn)
+    flow = task_flow(str(test.get("subject") or ""))
     parents = relation_ids(executable, str(test["id"]), "PARENT")
     associated = relation_ids(executable, str(test["id"]), "ASSOCIATED")
     req = resolve_requirement(executable, args.space_id, associated, args.req_sn)
@@ -488,23 +614,35 @@ def run(args: argparse.Namespace) -> int:
     if not str(parent.get("subject") or "").startswith("【交付】"):
         raise core.AdapterError("测试任务唯一父项不是【交付】任务。")
     if args.command == "manual-complete":
+        if flow != TASK_FLOW_OPTIMIZATION:
+            raise core.AdapterError(
+                "manual-complete仅适用于标题含【优化】的测试任务；"
+                "【新增】必须走complete完整证据门禁。"
+            )
         if args.manual_verdict != MANUAL_VERDICT:
             raise core.AdapterError(
-                "人工快捷闭环必须在用户明确确认人工验证通过后传"
+                "【优化】兼容闭环必须传"
                 "--manual-verdict passed。"
             )
         if status_name(test) not in MANUAL_TEST_ALLOWED or \
                 status_name(req) not in MANUAL_REQ_ALLOWED:
-            raise core.AdapterError(f"人工快捷闭环状态门禁失败：{before}")
+            raise core.AdapterError(f"【优化】兼容闭环状态门禁失败：{before}")
+        sprint = parent.get("sprint") if isinstance(parent.get("sprint"), dict) else {}
+        if not str(sprint.get("id") or ""):
+            raise core.AdapterError(
+                "父【交付】缺少迭代；请先运行yunxiao_cli_delivery_iteration.py预检，"
+                "将候选发用户确认后补绑。"
+            )
+        pass_comment = require_latest_pass_comment(executable, str(test["id"]))
         bugs = collect_bugs(
             executable, args.space_id, str(test["id"]), "", match_version=False,
         )
-        active = [bug for bug in bugs if bug["status"] not in MANUAL_BUG_CLOSED]
+        active = [bug for bug in bugs if bug["status"] not in CLOSED_BUG_STATUSES]
         if active:
             raise core.AdapterError(json.dumps({
                 "error": "manual_complete_has_active_bugs",
                 "activeBugs": active,
-                "hint": "人工验证通过不能覆盖活动缺陷；请先闭环缺陷。",
+                "hint": "【优化】通过评论不能覆盖活动缺陷；请先闭环缺陷。",
             }, ensure_ascii=False))
 
         actions: list[dict[str, Any]] = []
@@ -533,7 +671,8 @@ def run(args: argparse.Namespace) -> int:
             "schemaVersion": SCHEMA,
             "mode": "apply" if args.apply else "preflight",
             "command": "manual-complete",
-            "evidenceMode": "human-confirmed",
+            "taskFlow": flow,
+            "evidenceMode": "optimization-pass-comment-and-active-defect-gate",
             "manualVerdict": MANUAL_VERDICT,
             "releaseCandidateEligible": False,
             "organizationId": auth["organizationId"],
@@ -541,9 +680,13 @@ def run(args: argparse.Namespace) -> int:
             "before": before,
             "relations": {
                 "parentIds": parents,
-                "parent": item_snapshot(parent),
+                "parent": {**item_snapshot(parent), "sprint": {
+                    "id": str(sprint.get("id") or ""),
+                    "name": str(sprint.get("name") or ""),
+                }},
                 "associatedIds": associated,
             },
+            "passComment": pass_comment,
             "bugs": bugs,
             "plannedActions": actions,
             "verified": False,
@@ -572,7 +715,7 @@ def run(args: argparse.Namespace) -> int:
             receipt["verified"] = status_name(test) == "已完成" and \
                 status_name(req) == "测试完成"
             if not receipt["verified"]:
-                raise core.AdapterError("人工快捷闭环状态写入后回读失败。")
+                raise core.AdapterError("【优化】兼容闭环状态写入后回读失败。")
         target = Path(args.output) if args.output else core.output_dir() / \
             f"qa-lifecycle-{args.test_sn.lower()}-manual-complete.json"
         core.write_json(target, receipt)
@@ -650,25 +793,45 @@ def run(args: argparse.Namespace) -> int:
                 "父【交付】缺少迭代；请先运行yunxiao_cli_delivery_iteration.py预检，"
                 "将候选发用户确认后补绑。"
             )
-        live_testhub = validate_test_plan_complete(
-            executable, str(getattr(args, "test_plan_id", "") or ""),
-        )
-        approvals = parse_approvals(args.risk_approval)
         bugs = collect_bugs(
             executable, args.space_id, str(test["id"]), "", match_version=False,
         )
-        active = [bug for bug in bugs if bug["status"] not in {"已关闭", "暂不修复"}]
-        missing = [bug for bug in bugs if bug["status"] == "暂不修复"
-                   and bug["serialNumber"].upper() not in approvals]
-        closed_invalid = [bug for bug in bugs if bug["status"] == "已关闭"
-                          and not bug["retestEvidenceValid"]]
-        extra = sorted(set(approvals) - {bug["serialNumber"].upper() for bug in bugs
-                                        if bug["status"] == "暂不修复"})
-        if active or missing or closed_invalid or extra:
-            raise core.AdapterError(json.dumps({
-                "activeBugs": active, "missingRiskApprovals": missing,
-                "closedWithoutRetest": closed_invalid, "extraApprovals": extra,
-            }, ensure_ascii=False))
+        active = [bug for bug in bugs if bug["status"] not in CLOSED_BUG_STATUSES]
+        live_testhub: dict[str, Any] | None = None
+        approvals: dict[str, dict[str, str]] = {}
+        pass_comment: dict[str, Any] | None = None
+        if flow == TASK_FLOW_NEW:
+            live_testhub = validate_test_plan_complete(
+                executable, str(getattr(args, "test_plan_id", "") or ""),
+            )
+            approvals = parse_approvals(args.risk_approval)
+            missing = [bug for bug in bugs if bug["status"] == "暂不修复"
+                       and bug["serialNumber"].upper() not in approvals]
+            closed_invalid = [bug for bug in bugs if bug["status"] == "已关闭"
+                              and not bug["retestEvidenceValid"]]
+            extra = sorted(set(approvals) - {
+                bug["serialNumber"].upper() for bug in bugs
+                if bug["status"] == "暂不修复"
+            })
+            if active or missing or closed_invalid or extra:
+                raise core.AdapterError(json.dumps({
+                    "activeBugs": active, "missingRiskApprovals": missing,
+                    "closedWithoutRetest": closed_invalid,
+                    "extraApprovals": extra,
+                }, ensure_ascii=False))
+        else:
+            pass_comment = require_latest_pass_comment(
+                executable, str(test["id"]),
+            )
+            if active:
+                raise core.AdapterError(json.dumps({
+                    "error": "optimization_complete_has_active_bugs",
+                    "activeBugs": active,
+                    "hint": "【优化】任务必须先闭环全部活动缺陷。",
+                }, ensure_ascii=False))
+        release_candidate = flow == TASK_FLOW_NEW
+        evidence_mode = "testhub-and-defect-gates" if release_candidate else \
+            "optimization-pass-comment-and-active-defect-gate"
         actions: list[dict[str, Any]] = []
         if status_name(test) != "已完成":
             actions.append({"operation": "projex-update-workitem",
@@ -680,8 +843,9 @@ def run(args: argparse.Namespace) -> int:
             "schemaVersion": SCHEMA,
             "mode": "apply" if args.apply else "preflight",
             "command": "complete",
-            "evidenceMode": "testhub-and-defect-gates",
-            "releaseCandidateEligible": True,
+            "taskFlow": flow,
+            "evidenceMode": evidence_mode,
+            "releaseCandidateEligible": release_candidate,
             "organizationId": auth["organizationId"],
             "projectId": args.space_id,
             "before": before,
@@ -693,12 +857,15 @@ def run(args: argparse.Namespace) -> int:
                 }},
                 "associatedIds": associated,
             },
-            "testHub": live_testhub,
             "bugs": bugs,
-            "riskApprovals": approvals,
             "plannedActions": actions,
             "verified": False,
         }
+        if live_testhub is not None:
+            receipt["testHub"] = live_testhub
+            receipt["riskApprovals"] = approvals
+        if pass_comment is not None:
+            receipt["passComment"] = pass_comment
         if args.apply:
             if status_name(test) != "已完成":
                 test = update_status_checked(
@@ -724,7 +891,7 @@ def run(args: argparse.Namespace) -> int:
             "requirement": receipt.get("after", before)["requirement"],
             "testPlan": live_testhub,
             "bugs": len(bugs),
-            "releaseCandidateEligible": True,
+            "releaseCandidateEligible": release_candidate,
             "verified": receipt["verified"], "receipt": str(target),
         }, ensure_ascii=False, indent=2))
         return 0
