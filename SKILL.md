@@ -2,6 +2,7 @@
 name: YunxiaoQA
 description: >-
   测试人员云效（Projex）自动化：接收并开始【测试】任务，推进需求待测试→测试中，
+  执行复测、判断预期或提交缺陷前重新读取最新原型PRD，并在提交前再次确认需求未变化，
   每日监测01_ONEOS新交付任务并为标题同时含【交付】【新增】且已选迭代的交付任务自动创建测试计划，
   扫描全部可见用例库，匹配后通知确认再规划用例；
   测试闭环按任务标题分流：【新增】回读TestHub计划与完整缺陷证据，【优化】回读测试通过评论且确认无活动缺陷；
@@ -27,7 +28,14 @@ description: >-
 
 与 **YunxiaoPM（需求任务）**、开发交付 Skill 分工：本 Skill **只做测试侧**读写。
 
-闭环版本：`2.7.5`。
+闭环版本：`2.7.6`。
+
+## 最新原型 PRD 门禁（强制）
+
+凡执行测试、复测、判断预期结果、创建缺陷、追加失败评论、再次打开或关闭缺陷，均先按
+[references/prototype-prd-gate.md](references/prototype-prd-gate.md) 重新读取当前可用的最新原型 PRD/标注。
+若测试执行到云效提交之间经过等待、刷新、切换账号或需求可能更新，提交前必须再次读取并比较；
+发现预期变化时，立即按新口径重判并补测受影响路径，禁止沿用旧缺陷描述、旧评论或旧测试用例中的过期预期。
 
 ## Plan 模式门禁（强制 · 凡写云效）
 
@@ -79,6 +87,7 @@ description: >-
 | 挂载点选【测试】/需求 | [references/anchor-selection.md](references/anchor-selection.md) · `scripts/list_bug_anchors.py` |
 | 实写 API | [references/live-api.md](references/live-api.md)（01_ONEOS 已验证） |
 | 测试执行闭环 | [references/test-execution.md](references/test-execution.md) · `scripts/yunxiao_cli_test_lifecycle.py` · `scripts/yunxiao_cli_bug_retest.py` · `scripts/yunxiao_cli_req_test_complete.py` |
+| 最新原型PRD重读与预期重判 | [references/prototype-prd-gate.md](references/prototype-prd-gate.md) · 可用时调用正式 Skill `axhub-prototype-context` |
 | 父交付缺迭代补绑 | [references/test-execution.md](references/test-execution.md) · `scripts/yunxiao_cli_delivery_iteration.py` |
 | TestHub计划/用例执行 | [references/yunxiao-cli-testhub.md](references/yunxiao-cli-testhub.md) · `scripts/yunxiao_cli_testhub.py` |
 | 新交付任务监测/自动建测试计划 | [references/requirement-testplan-monitor.md](references/requirement-testplan-monitor.md) · `scripts/yunxiao_delivery_plan_monitor.py` |
@@ -200,6 +209,7 @@ skill-run yunxiao_cli_delivery_iteration.py `
 
 每次 `发起缺陷` / `从测试用例发起缺陷` / `发起缺陷(非本期)`：
 
+0. **重读最新原型PRD**：按 [prototype-prd-gate.md](references/prototype-prd-gate.md) 确认当前预期；提交前再次检查需求是否变化。来源不可读或口径冲突时停止写入，不猜预期。
 1. **规范化证据**（环境、路径、角色、时间、步骤、实际/期望、截图；无秘密）
 2. **查重**（活跃 + 近期关闭；同因则更新旧单并回报，不问则新建）
 3. **分层初判**（前端/后端/数据/配置/环境；标「推断」）
@@ -245,6 +255,7 @@ skill-run yunxiao_cli_delivery_iteration.py `
 
 ## 验收清单（回报自检）
 
+- [ ] 测试/复测与云效提交前均已重读最新原型PRD；若版本或口径变化，已按新预期重判并补测，证据含来源定位与读取时间
 - [ ] 拉【测试】：仅待处理/处理中（或口令指定）
 - [ ] 开始测试：【测试】待处理→处理中；需求待测试→测试中；两侧均回读
 - [ ] 发起缺陷（独立/测试用例）：验证者=当前登录用户且已回读；负责人/关联正确；走过查重+模板

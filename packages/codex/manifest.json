@@ -1,6 +1,6 @@
-{
-  "client": "codex",
-  "skill": "YunxiaoQA",
-  "archive": "YunxiaoQA.zip",
-  "sha256": "d338f4b81de9b03765268e9ab82f357a52cccd6deba8c5ae241faa9551c95a6c"
+﻿{
+    "client":  "codex",
+    "skill":  "YunxiaoQA",
+    "archive":  "YunxiaoQA.zip",
+    "sha256":  "000decab92cfe197dbb27fa71a473f55b02a887403e4be16bf224788b789c55d"
 }
