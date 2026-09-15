@@ -31,6 +31,28 @@ class BugOperationTests(unittest.TestCase):
             found = create_bug.find_exact_title_duplicates(object(), "space", "【模块】同名")
         self.assertEqual([item["serialNumber"] for item in found], ["ONEOS-1"])
 
+    def test_human_description_accepts_concrete_content(self) -> None:
+        create_bug.require_human_description(
+            "<h2>人话版描述</h2><p>在任务工单点击暂存后，页面提示系统错误。</p>"
+            "<h2>复测记录</h2><p>待复测</p>"
+        )
+
+    def test_empty_human_description_is_not_satisfied_by_later_sections(self) -> None:
+        with self.assertRaises(SystemExit):
+            create_bug.require_human_description(
+                "<h2>人话版描述</h2><p> </p>"
+                "<h2>复测记录</h2><p>这里有足够长的后续内容，但不能代替人话版描述。</p>"
+            )
+
+    def test_human_description_rejects_missing_or_placeholder_content(self) -> None:
+        invalid_descriptions = (
+            "<h2>现象</h2><p>页面报错</p>",
+            "<h2>人话版描述</h2><p>TODO：待补充</p>",
+        )
+        for description in invalid_descriptions:
+            with self.subTest(description=description), self.assertRaises(SystemExit):
+                create_bug.require_human_description(description)
+
     def test_tag_ids_reads_nested_shapes(self) -> None:
         value = [{"identifier": "tag-a"}, {"value": {"id": "tag-b"}}]
         self.assertEqual(create_bug.tag_ids(value), {"tag-a", "tag-b"})

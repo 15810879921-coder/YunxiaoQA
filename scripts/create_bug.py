@@ -11,17 +11,18 @@
 4. 独立建单和测试用例来源建单统一把验证者设置为当前登录用户；不接受验证者覆盖。
 
 示例：
-  skill-run create_bug.py --mode 本期 --title '[验证] …' \\
-    --test-task DEMO-90 --assignee 沈辰 --dry-run
+  skill-run create_bug.py --mode 本期 --title '【任务工单】暂存草稿时报错' \\
+    --description-file defect.md --test-task DEMO-90 --assignee 沈辰 --dry-run
 
   skill-run create_bug.py --mode 本期 --source test-case \\
-    --test-case CASE-1001 --title '[验证] …' --test-task DEMO-90 \\
+    --test-case CASE-1001 --title '【任务工单】暂存草稿时报错' --description-file defect.md --test-task DEMO-90 \\
     --assignee 沈辰 --dry-run
 """
 from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -90,6 +91,19 @@ def default_html(title: str, extra: str | None) -> str:
 <h2>初步定位</h2>
 <p>分层：待确认（推断）</p>
 """
+
+
+def require_human_description(description: str) -> None:
+    marker = "人话版描述"
+    if marker not in description:
+        raise SystemExit("缺陷正文必须包含非空的「人话版描述」段")
+    section = description.split(marker, 1)[1]
+    section = re.split(r"<h[1-6]\b|^\s*#{1,6}\s+", section, maxsplit=1, flags=re.MULTILINE)[0]
+    plain = re.sub(r"<[^>]+>", " ", section)
+    plain = re.sub(r"[`*_>#-]|&nbsp;", " ", plain)
+    plain = re.sub(r"\s+", " ", plain).strip()
+    if len(plain) < 8 or any(x in plain for x in ("请填写", "待补充", "模板提示", "TODO")):
+        raise SystemExit("「人话版描述」必须填写具体内容，不能留空或使用占位文案")
 
 
 def relation_hit(items: list[dict], target_id: str) -> bool:
@@ -300,6 +314,7 @@ def main() -> None:
         html = Path(args.description_file).read_text(encoding="utf-8")
     if not html:
         html = default_html(args.title, None)
+    require_human_description(html)
 
     try:
         assignee_id, assignee_name = resolve_person(args.assignee)
